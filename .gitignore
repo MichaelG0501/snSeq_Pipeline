@@ -1,0 +1,22 @@
+# Ignore output folder
+/sn_outs
+
+# Ignore job output and error files
+*.[oe]*
+
+# LaTeX build artifacts
+*.pdf
+*.tex
+*.png
+*.txt
+*.csv
+*.pptx
+*.aux
+*.log
+*.out
+*.toc
+*.nav
+*.snm
+*.synctex.gz
+*.fls
+*.fdb_latexmk
