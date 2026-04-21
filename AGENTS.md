@@ -102,11 +102,12 @@ These rules are inherited from the reference workspace and remain mandatory here
 2. **Conda init**: always run `eval "$(~/miniforge3/bin/conda shell.bash hook)"` before activating environments.
 3. **Interactive first**: tasks under 8 cores / 64 GB should default to `.R` script changes only when the user wants interactive execution.
 4. **PBS required**: heavy tasks must have PBS `.sh` wrappers with `#PBS` resource headers.
-5. **File naming**: new persistent helper files should be prefixed with `Auto_` unless they are part of the agreed pipeline step contract.
-6. **Modifying existing files**: when extending existing R code, wrap substantial new blocks in 20-hash comment delimiters.
-7. **No destructive cleanup**: do not delete, move, or overwrite user data outside this working directory.
-8. **Ephemeral test scripts**: temporary debug scripts should use disposable names and should not become part of the pipeline contract.
-9. **Max concurrent PBS jobs**: throttle per-sample submission to 46 jobs.
+5. **Live Logging**: Always use live streaming log file mode by adding `#PBS -koed` to the submission script. This ensures standard out and standard error are written to their final destination as the job is running, allowing for real-time monitoring from login nodes.
+6. **File naming**: new persistent helper files should be prefixed with `Auto_` unless they are part of the agreed pipeline step contract.
+7. **Modifying existing files**: when extending existing R code, wrap substantial new blocks in 20-hash comment delimiters.
+8. **No destructive cleanup**: do not delete, move, or overwrite user data outside this working directory.
+9. **Ephemeral test scripts**: temporary debug scripts should use disposable names and should not become part of the pipeline contract.
+10. **Max concurrent PBS jobs**: throttle per-sample submission to 46 jobs.
 
 ### Workspace-Specific Rules
 
@@ -142,6 +143,7 @@ These rules are inherited from the reference workspace and remain mandatory here
 #PBS -l select=1:ncpus=<N>:mem=<M>gb
 #PBS -l walltime=<HH:MM:SS>
 #PBS -N <jobname>
+#PBS -koed
 echo "$(date +%T)"
 module purge
 module load tools/dev
