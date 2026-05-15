@@ -1,55 +1,71 @@
 ####################
-# Auto_states_hybrid_pairwise_nodeplot.R
-# Node plot for real states and pairwise hybrid proportions.
-# Multi-class hybrids (>2 groups) are excluded from edge construction.
+# Analysis registry:
+#   Status: active terminal figure-generation
+#   Script: analysis/cell_states/plot_state_hybrid_pairwise.R
+#   Methodology: analysis/methodology/cell_states/plot_state_hybrid_pairwise_methodology.md
+#   Map: analysis/ANALYSIS_MAP.md
+#   Output tiers: sn_outs/cell_states/hybrid_pairwise/{intermediate,tables,figures,logs,reports}
+####################
+
+####################
+# plot_state_hybrid_pairwise.R
+#
+# Generate node and heatmap summaries for pairwise hybrid cells in the selected
+# Approach-B noreg state assignment. Multi-class hybrids are excluded from edge
+# construction.
+#
+# Input:
+#   sn_outs/Auto_final_states.rds or sn_outs/Auto_topmp_v2_noreg_states_B.rds
+#   sn_outs/Auto_topmp_v2_noreg_mp_adj.rds
+#
+# Output:
+#   sn_outs/task6_hybrid_pairwise/Auto_task6_hybrid_pairwise_nodeplot_noreg.pdf
+#   sn_outs/task6_hybrid_pairwise/Auto_task6_hybrid_pairwise_heatmap_noreg.pdf
+#   sn_outs/task6_hybrid_pairwise/Auto_task6_hybrid_pairwise_nodeplot_summary.csv
+#   sn_outs/cell_states/hybrid_pairwise/tables/hybrid_pairwise_summary.csv
+#   sn_outs/cell_states/hybrid_pairwise/logs/plot_state_hybrid_pairwise.log
+#
+# Usage:
+#   Rscript analysis/cell_states/plot_state_hybrid_pairwise.R
 ####################
 
 library(ggplot2)
 library(dplyr)
 library(tidyr)
 
-setwd("/rds/general/ephemeral/project/tumourheterogeneity1/ephemeral/snSeq_Pipeline/sn_outs")
+source("/rds/general/ephemeral/project/tumourheterogeneity1/ephemeral/snSeq_Pipeline/analysis/lib/config.R")
+source(file.path(ANALYSIS_DIR, "lib", "state_helpers.R"))
+source(file.path(ANALYSIS_DIR, "lib", "logging.R"))
+
+setwd(SN_OUTS_DIR)
 task_prefix <- "task6"
 out_dir <- paste0(task_prefix, "_hybrid_pairwise")
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+output_dirs <- ensure_output_dirs("cell_states/hybrid_pairwise")
 
-real_states <- c(
-  "Classic Proliferative",
-  "Basal to Intestinal Metaplasia",
-  "Stress-adaptive",
-  "SMG-like Metaplasia",
-  "Immune Infiltrating"
+real_states <- names(STATE_GROUPS)
+state_groups <- STATE_GROUPS
+group_cols <- STATE_COLORS
+
+run_summary <- start_run_summary(
+  script = "analysis/cell_states/plot_state_hybrid_pairwise.R",
+  inputs = c(
+    PREFERRED_STATE_DEFINITION$final_state_file,
+    PREFERRED_STATE_DEFINITION$primary_state_file,
+    file.path(SN_OUTS_DIR, "Auto_topmp_v2_noreg_mp_adj.rds")
+  ),
+  outputs = c(
+    file.path(out_dir, "Auto_task6_hybrid_pairwise_nodeplot_noreg.pdf"),
+    file.path(out_dir, "Auto_task6_hybrid_pairwise_heatmap_noreg.pdf"),
+    file.path(out_dir, "Auto_task6_hybrid_pairwise_nodeplot_summary.csv")
+  ),
+  parameters = list(state_method = PREFERRED_STATE_DEFINITION$label)
 )
 
-state_groups <- list(
-  "Classic Proliferative" = c("MP2"),
-  "Basal to Intestinal Metaplasia" = c("MP17", "MP14", "MP5", "MP10", "MP8"),
-  "Stress-adaptive" = c("MP13", "MP12"),
-  "SMG-like Metaplasia" = c("MP18", "MP16"),
-  "Immune Infiltrating" = c("MP15")
-)
-
-group_cols <- c(
-  "Classic Proliferative" = "#E41A1C",
-  "Basal to Intestinal Metaplasia" = "#4DAF4A",
-  "Stress-adaptive" = "#984EA3",
-  "SMG-like Metaplasia" = "#FF7F00",
-  "Immune Infiltrating" = "#377EB8",
-  "Unresolved" = "grey80",
-  "Hybrid" = "black"
-)
-
-state_B <- readRDS("Auto_topmp_v2_noreg_states_B.rds")
+state_B <- read_preferred_states()
 mp_adj <- readRDS("Auto_topmp_v2_noreg_mp_adj.rds")
 
-group_max <- sapply(state_groups, function(mps) {
-  mps_avail <- intersect(mps, colnames(mp_adj))
-  if (length(mps_avail) == 0) return(rep(NA_real_, nrow(mp_adj)))
-  if (length(mps_avail) == 1) return(as.numeric(mp_adj[, mps_avail]))
-  apply(mp_adj[, mps_avail, drop = FALSE], 1, max)
-})
-group_max <- as.matrix(group_max)
-rownames(group_max) <- rownames(mp_adj)
+group_max <- build_group_max(mp_adj, state_groups)
 
 hybrid_cells <- names(state_B)[state_B == "Hybrid"]
 
@@ -173,4 +189,18 @@ write.csv(
   ),
   file.path(out_dir, "Auto_task6_hybrid_pairwise_nodeplot_summary.csv"),
   row.names = FALSE
+)
+write.csv(
+  bind_rows(
+    state_df %>% transmute(type = "state", label = state, cells = cells, pct = pct),
+    pair_df %>% transmute(type = "pairwise_hybrid", label = pair, cells = hybrid_cells, pct = pct)
+  ),
+  file.path(output_dirs["tables"], "hybrid_pairwise_summary.csv"),
+  row.names = FALSE
+)
+
+run_summary <- finish_run_summary(run_summary, status = "ok")
+write_run_summary(
+  run_summary,
+  file.path(output_dirs["logs"], "plot_state_hybrid_pairwise.log")
 )

@@ -2,6 +2,7 @@
 #PBS -l select=1:ncpus=8:mem=256gb
 #PBS -l walltime=24:00:00
 #PBS -N snseq_filter
+#PBS -koed
 
 set -euo pipefail
 
@@ -17,6 +18,6 @@ WD=/rds/general/ephemeral/project/tumourheterogeneity1/ephemeral/snSeq_Pipeline
 cd "${WD}"
 
 Rscript Expr_filtering.R
-Rscript analysis/summary/summary.R
+Rscript analysis/summary/expression_filter_summary.R
 
 echo "$(date +%T)"

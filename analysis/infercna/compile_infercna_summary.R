@@ -1,30 +1,72 @@
+####################
+# Analysis registry:
+#   Status: active
+#   Script: analysis/infercna/compile_infercna_summary.R
+#   Methodology: analysis/methodology/infercna/compile_infercna_summary_methodology.md
+#   Map: analysis/ANALYSIS_MAP.md
+#   Output tiers: sn_outs/infercna/compile_summary/{intermediate,tables,figures,logs,reports}
+####################
+
+####################
+# compile_infercna_summary.R
+#
+# Compile per-sample step-5 InferCNA status, sample summaries, cluster
+# summaries, and tumour-signature gene membership into cohort-level tables.
+#
+# Input:
+#   sn_outs/sample_manifest.csv
+#   sn_outs/filtered_sample_summary.csv
+#   sn_outs/by_samples/<sample>/expr_filter_status.txt
+#   sn_outs/by_samples/<sample>/infercna_status.txt
+#   sn_outs/by_samples/<sample>/<sample>_infercna_summary.csv
+#   sn_outs/by_samples/<sample>/<sample>_infercna_cluster_summary.csv
+#   sn_outs/by_samples/<sample>/<sample>_signatures.rds
+#
+# Output:
+#   sn_outs/infercna_status_by_sample.csv
+#   sn_outs/infercna_sample_summary.csv
+#   sn_outs/infercna_overall_summary.csv
+#   sn_outs/infercna_classification_overall.csv
+#   sn_outs/infercna_cluster_label_overall.csv
+#   sn_outs/infercna_cluster_summary.csv
+#   sn_outs/cancer_signatures_by_sample.csv
+#   sn_outs/cancer_signatures_summary.csv
+#   sn_outs/cancer_signatures.txt
+#   sn_outs/infercna/compile_summary/logs/compile_infercna_summary.log
+#
+# Usage:
+#   Rscript analysis/infercna/compile_infercna_summary.R
+####################
+
 suppressPackageStartupMessages({
   library("dplyr")
 })
 
-pipeline_root <- "/rds/general/ephemeral/project/tumourheterogeneity1/ephemeral/snSeq_Pipeline"
-sn_root <- file.path(pipeline_root, "sn_outs")
+source("/rds/general/ephemeral/project/tumourheterogeneity1/ephemeral/snSeq_Pipeline/analysis/lib/config.R")
+source(file.path(ANALYSIS_DIR, "lib", "io_helpers.R"))
+source(file.path(ANALYSIS_DIR, "lib", "logging.R"))
+
+pipeline_root <- PROJECT_DIR
+sn_root <- SN_OUTS_DIR
 setwd(pipeline_root)
+output_dirs <- ensure_output_dirs("infercna/compile_summary")
+
+run_summary <- start_run_summary(
+  script = "analysis/infercna/compile_infercna_summary.R",
+  inputs = c(file.path(sn_root, "sample_manifest.csv"), file.path(sn_root, "filtered_sample_summary.csv")),
+  outputs = c(
+    file.path(sn_root, "infercna_status_by_sample.csv"),
+    file.path(sn_root, "infercna_sample_summary.csv"),
+    file.path(sn_root, "cancer_signatures_summary.csv")
+  ),
+  parameters = list(stage = "infercna_summary")
+)
 
 manifest_path <- file.path(sn_root, "sample_manifest.csv")
 filtered_summary_path <- file.path(sn_root, "filtered_sample_summary.csv")
 
 manifest <- read.csv(manifest_path, stringsAsFactors = FALSE)
 filtered_summary <- read.csv(filtered_summary_path, stringsAsFactors = FALSE)
-
-read_status <- function(path) {
-  if (!file.exists(path)) {
-    return(NA_character_)
-  }
-  trimws(readLines(path, warn = FALSE, n = 1))
-}
-
-read_optional_csv <- function(path) {
-  if (!file.exists(path)) {
-    return(NULL)
-  }
-  read.csv(path, stringsAsFactors = FALSE)
-}
 
 status_rows <- lapply(manifest$sample, function(sample) {
   expr_status <- read_status(file.path(sn_root, "by_samples", sample, "expr_filter_status.txt"))
@@ -260,6 +302,12 @@ if (nrow(cluster_summaries) > 0) {
     quote = TRUE
   )
 }
+
+run_summary <- finish_run_summary(run_summary, status = "ok")
+write_run_summary(
+  run_summary,
+  file.path(output_dirs["logs"], "compile_infercna_summary.log")
+)
 
 if (nrow(signature_membership) > 0) {
   signature_summary <- signature_membership %>%

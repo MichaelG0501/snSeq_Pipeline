@@ -1,8 +1,31 @@
 #!/usr/bin/env Rscript
 ################################################################################
-# Validate Malignant Signatures
-# Computes the cancer signature score from scratch on Step 5 outputs (_epi.rds)
-# Checks the consistency against InferCNA calls before running Malignancy.R
+# Analysis registry:
+#   Status: active audit
+#   Script: analysis/infercna/validate_malignancy_signatures.R
+#   Methodology: analysis/methodology/infercna/validate_malignancy_signatures_methodology.md
+#   Map: analysis/ANALYSIS_MAP.md
+#   Output tiers: sn_outs/infercna/signature_validation/{intermediate,tables,figures,logs,reports}
+################################################################################
+
+################################################################################
+# validate_malignancy_signatures.R
+#
+# Validate malignant signature and cell-cycle scores against step-5 InferCNA
+# calls before step-6 malignancy labelling.
+#
+# Input:
+#   sn_outs/cancer_signatures.txt
+#   sn_outs/cancer_signatures_summary.csv
+#   sn_outs/by_samples/<sample>/<sample>_epi.rds
+#   /rds/general/project/tumourheterogeneity1/live/EAC_Ref_all/Cell_Cycle_Genes.csv
+#
+# Output:
+#   sn_outs/infercna/signature_validation/reports/validation_cancer_signatures_vs_cna.pdf
+#   sn_outs/infercna/signature_validation/logs/validate_malignancy_signatures.log
+#
+# Usage:
+#   Rscript analysis/infercna/validate_malignancy_signatures.R
 ################################################################################
 
 suppressPackageStartupMessages({
@@ -12,8 +35,21 @@ suppressPackageStartupMessages({
   library(patchwork)
 })
 
-# Move to the snSeq outputs folder
-setwd("/rds/general/ephemeral/project/tumourheterogeneity1/ephemeral/snSeq_Pipeline/sn_outs")
+source("/rds/general/ephemeral/project/tumourheterogeneity1/ephemeral/snSeq_Pipeline/analysis/lib/config.R")
+source(file.path(ANALYSIS_DIR, "lib", "logging.R"))
+
+setwd(SN_OUTS_DIR)
+output_dirs <- ensure_output_dirs("infercna/signature_validation")
+run_summary <- start_run_summary(
+  script = "analysis/infercna/validate_malignancy_signatures.R",
+  inputs = c(
+    file.path(SN_OUTS_DIR, "cancer_signatures.txt"),
+    file.path(SN_OUTS_DIR, "cancer_signatures_summary.csv"),
+    "/rds/general/project/tumourheterogeneity1/live/EAC_Ref_all/Cell_Cycle_Genes.csv"
+  ),
+  outputs = c(file.path(output_dirs["reports"], "validation_cancer_signatures_vs_cna.pdf")),
+  parameters = list(stage = "pre_malignancy_signature_validation")
+)
 
 # Helper function to compute the signature score
 score_signature <- function(obj, genes) {
@@ -163,9 +199,7 @@ p3 <- ggplot(df_clus, aes(x = malignant_clus, y = cs_score, fill = malignant_clu
 # Output
 # ----------------------------------------------------------------------------------
 
-out_dir <- "analysis/infercna"
-if (!dir.exists(out_dir)) dir.create(out_dir, recursive = TRUE)
-pdf_path <- file.path(out_dir, "validation_cancer_signatures_vs_cna.pdf")
+pdf_path <- file.path(output_dirs["reports"], "validation_cancer_signatures_vs_cna.pdf")
 
 message("Done! Processing output...")
 
@@ -214,3 +248,9 @@ print((p1 + p3) / (p_cc1 + p_cc2))
 dev.off()
 
 message("Full report saved to: sn_outs/", pdf_path)
+
+run_summary <- finish_run_summary(run_summary, status = "ok")
+write_run_summary(
+  run_summary,
+  file.path(output_dirs["logs"], "validate_malignancy_signatures.log")
+)

@@ -1,3 +1,46 @@
+####################
+# Analysis registry:
+#   Status: active
+#   Script: analysis/cell_states/prepare_malignant_epithelial_ucell.R
+#   Methodology: analysis/methodology/cell_states/prepare_malignant_epithelial_ucell_methodology.md
+#   Map: analysis/ANALYSIS_MAP.md
+#   Output tiers: sn_outs/cell_states/ucell_scoring/{intermediate,tables,figures,logs,reports}
+####################
+
+####################
+# prepare_malignant_epithelial_ucell.R
+#
+# Merge completed malignant epithelial step-6 outputs and score the retained
+# scRef and 3CA metaprograms with UCell. This is the current step-7 input
+# preparation for the noreg Approach-B state workflow.
+#
+# Input:
+#   sn_outs/sample_manifest.csv
+#   sn_outs/by_samples/<sample>/expr_filter_status.txt
+#   sn_outs/by_samples/<sample>/infercna_status.txt
+#   sn_outs/by_samples/<sample>/malignancy_status.txt
+#   sn_outs/by_samples/<sample>/<sample>_epi_f.rds
+#   /rds/general/ephemeral/project/tumourheterogeneity1/ephemeral/scRef_Pipeline/ref_outs/Metaprogrammes_Results/geneNMF_metaprograms_nMP_19.rds
+#   /rds/general/project/tumourheterogeneity1/live/ITH_sc/PDOs/Count_Matrix/New_NMFs.csv
+#   /rds/general/project/tumourheterogeneity1/live/EAC_Ref_all/Cell_Cycle_Genes.csv
+#
+# Output:
+#   sn_outs/snSeq_malignant_epi.rds
+#   sn_outs/snSeq_malignant_epi_meta.rds
+#   sn_outs/snSeq_malignant_epi_sample_summary.csv
+#   sn_outs/snSeq_malignant_epi_status_input.csv
+#   sn_outs/snSeq_malignant_epi_overall_summary.csv
+#   sn_outs/snSeq_malignant_epi_cc_top50.rds
+#   sn_outs/snSeq_malignant_epi_cc_score.rds
+#   sn_outs/Metaprogrammes_Results/geneNMF_metaprograms_nMP_19.rds
+#   sn_outs/Metaprogrammes_Results/UCell_nMP19_filtered.rds
+#   sn_outs/UCell_3CA_MPs.rds
+#   sn_outs/cell_states/ucell_scoring/logs/prepare_malignant_epithelial_ucell.log
+#
+# Usage:
+#   Rscript analysis/cell_states/prepare_malignant_epithelial_ucell.R
+####################
+
 suppressPackageStartupMessages({
   library("dplyr")
   library("Matrix")
@@ -8,53 +51,36 @@ suppressPackageStartupMessages({
 
 set.seed(1)
 
-project_dir <- "/rds/general/ephemeral/project/tumourheterogeneity1/ephemeral/snSeq_Pipeline"
-out_dir <- file.path(project_dir, "sn_outs")
-ref_outs_dir <- "/rds/general/ephemeral/project/tumourheterogeneity1/ephemeral/scRef_Pipeline/ref_outs"
+source("/rds/general/ephemeral/project/tumourheterogeneity1/ephemeral/snSeq_Pipeline/analysis/lib/config.R")
+source(file.path(ANALYSIS_DIR, "lib", "io_helpers.R"))
+source(file.path(ANALYSIS_DIR, "lib", "logging.R"))
+
+project_dir <- PROJECT_DIR
+out_dir <- SN_OUTS_DIR
+ref_outs_dir <- SCREF_OUTS_DIR
 setwd(out_dir)
 
 dir.create("Metaprogrammes_Results", recursive = TRUE, showWarnings = FALSE)
+output_dirs <- ensure_output_dirs("cell_states/ucell_scoring")
 
-read_status <- function(path) {
-  if (!file.exists(path)) {
-    return(NA_character_)
-  }
-  trimws(readLines(path, warn = FALSE, n = 1))
-}
-
-extract_layer_matrix_subset <- function(seurat_obj, genes, assay = "RNA", layer_prefix = "data") {
-  genes <- unique(genes[!is.na(genes) & nzchar(genes)])
-  if (length(genes) == 0) {
-    stop("No genes provided for layer extraction.")
-  }
-
-  assay_obj <- seurat_obj[[assay]]
-  layer_names <- Layers(assay_obj)
-  target_layers <- layer_names[grepl(paste0("^", layer_prefix, "(\\.|$)"), layer_names)]
-
-  if (length(target_layers) == 0) {
-    stop("No layers found with prefix '", layer_prefix, "' in assay ", assay)
-  }
-
-  layer_mats <- lapply(target_layers, function(layer_name) {
-    layer_mat <- LayerData(seurat_obj, assay = assay, layer = layer_name)
-    common_genes <- intersect(genes, rownames(layer_mat))
-    out_mat <- Matrix(
-      0,
-      nrow = length(genes),
-      ncol = ncol(layer_mat),
-      sparse = TRUE,
-      dimnames = list(genes, colnames(layer_mat))
-    )
-    if (length(common_genes) > 0) {
-      out_mat[match(common_genes, genes), ] <- layer_mat[common_genes, , drop = FALSE]
-    }
-    out_mat
-  })
-
-  merged_mat <- do.call(cbind, layer_mats)
-  merged_mat[, Cells(seurat_obj), drop = FALSE]
-}
+run_summary <- start_run_summary(
+  script = "analysis/cell_states/prepare_malignant_epithelial_ucell.R",
+  inputs = c(
+    file.path(out_dir, "sample_manifest.csv"),
+    file.path(ref_outs_dir, "Metaprogrammes_Results", "geneNMF_metaprograms_nMP_19.rds"),
+    "/rds/general/project/tumourheterogeneity1/live/ITH_sc/PDOs/Count_Matrix/New_NMFs.csv",
+    "/rds/general/project/tumourheterogeneity1/live/EAC_Ref_all/Cell_Cycle_Genes.csv"
+  ),
+  outputs = c(
+    file.path(out_dir, "snSeq_malignant_epi.rds"),
+    file.path(out_dir, "Metaprogrammes_Results", "UCell_nMP19_filtered.rds"),
+    file.path(out_dir, "UCell_3CA_MPs.rds")
+  ),
+  parameters = list(
+    state_method = PREFERRED_STATE_DEFINITION$label,
+    malignant_labels = c("malignant_level_1", "malignant_level_2")
+  )
+)
 
 manifest_path <- file.path(out_dir, "sample_manifest.csv")
 if (!file.exists(manifest_path)) {
@@ -305,4 +331,10 @@ message(
   " cells across ",
   length(tmdata_malignant),
   " samples."
+)
+
+run_summary <- finish_run_summary(run_summary, status = "ok")
+write_run_summary(
+  run_summary,
+  file.path(output_dirs["logs"], "prepare_malignant_epithelial_ucell.log")
 )

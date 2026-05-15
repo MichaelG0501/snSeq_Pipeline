@@ -1,3 +1,31 @@
+####################
+# Analysis registry:
+#   Status: active terminal figure-generation
+#   Script: analysis/infercna/plot_infercna_scatter_examples.R
+#   Methodology: analysis/methodology/infercna/plot_infercna_scatter_examples_methodology.md
+#   Map: analysis/ANALYSIS_MAP.md
+#   Output tiers: sn_outs/infercna/scatter_examples/{intermediate,tables,figures,logs,reports}
+####################
+
+####################
+# plot_infercna_scatter_examples.R
+#
+# Plot selected InferCNA scatter examples representing high, mixed, and low CNA
+# signal profiles. This is a terminal review figure and is not used downstream.
+#
+# Input:
+#   sn_outs/by_samples/<sample>/<sample>_outs.rds
+#   sn_outs/by_samples/<sample>/<sample>_epi.rds
+#   sn_outs/by_samples/<sample>/<sample>_infercna_summary.csv
+#
+# Output:
+#   sn_outs/infercna/scatter_examples/figures/malignancy_scatter_comparison.png
+#   sn_outs/infercna/scatter_examples/logs/plot_infercna_scatter_examples.log
+#
+# Usage:
+#   Rscript analysis/infercna/plot_infercna_scatter_examples.R
+####################
+
 suppressPackageStartupMessages({
   library("dplyr")
   library("ggplot2")
@@ -7,17 +35,27 @@ suppressPackageStartupMessages({
   library("scales")
 })
 
-# WD
-setwd("/rds/general/ephemeral/project/tumourheterogeneity1/ephemeral/snSeq_Pipeline")
+source("/rds/general/ephemeral/project/tumourheterogeneity1/ephemeral/snSeq_Pipeline/analysis/lib/config.R")
+source(file.path(ANALYSIS_DIR, "lib", "logging.R"))
+
+setwd(PROJECT_DIR)
+output_dirs <- ensure_output_dirs("infercna/scatter_examples")
 
 out_dir <- "sn_outs"
-output_pdf <- file.path(out_dir, "Auto_malignancy_scatter_comparison.png")
+output_pdf <- file.path(output_dirs["figures"], "malignancy_scatter_comparison.png")
 
 # Samples: Good, Medium, Bad
 samples <- c("C_post_N2_biopsy", "D_pre_T0_biopsy", "N_post_T1_biopsy")
 names(samples) <- c("Good (Mostly CNA Positive)", 
                     "Medium (Mixed Profile)", 
                     "Bad (Mostly CNA Negative)")
+
+run_summary <- start_run_summary(
+  script = "analysis/infercna/plot_infercna_scatter_examples.R",
+  inputs = unname(file.path(SN_OUTS_DIR, "by_samples", samples, paste0(samples, "_outs.rds"))),
+  outputs = output_pdf,
+  parameters = list(samples = samples)
+)
 
 plot_list <- list()
 
@@ -116,3 +154,9 @@ if (length(plot_list) == 3) {
   ggsave(output_pdf, combined_plot, width = 18, height = 7, dpi = 300)
   message("Success: Created 3-sample CNA comparison plot at ", output_pdf)
 }
+
+run_summary <- finish_run_summary(run_summary, status = "ok")
+write_run_summary(
+  run_summary,
+  file.path(output_dirs["logs"], "plot_infercna_scatter_examples.log")
+)

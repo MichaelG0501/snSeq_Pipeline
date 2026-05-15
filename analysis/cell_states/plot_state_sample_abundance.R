@@ -1,8 +1,34 @@
 ####################
-# Auto_sample_abundance.R
-# Sample-level abundance plots for the snRNA-seq malignant epithelial
-# cell-state analysis. The plotting style is kept aligned with the scRef
-# implementation; only the data source changes.
+# Analysis registry:
+#   Status: active terminal figure-generation
+#   Script: analysis/cell_states/plot_state_sample_abundance.R
+#   Methodology: analysis/methodology/cell_states/plot_state_sample_abundance_methodology.md
+#   Map: analysis/ANALYSIS_MAP.md
+#   Output tiers: sn_outs/cell_states/sample_abundance/{intermediate,tables,figures,logs,reports}
+####################
+
+####################
+# plot_state_sample_abundance.R
+#
+# Generate sample-level abundance views for final malignant epithelial states,
+# top non-cell-cycle MPs, all MPs, and the Basal-to-Intestinal metaplasia MP
+# breakdown. Uses the selected Approach-B noreg final state labels.
+#
+# Input:
+#   sn_outs/snSeq_malignant_epi.rds
+#   sn_outs/Auto_final_states.rds
+#   sn_outs/Auto_topmp_v2_noreg_mp_adj.rds
+#   sn_outs/Metaprogrammes_Results/geneNMF_metaprograms_nMP_19.rds
+#   sn_outs/Metaprogrammes_Results/UCell_nMP19_filtered.rds
+#
+# Output:
+#   sn_outs/task3_sample_abundance/Auto_task3_sample_abundance.pdf
+#   sn_outs/task3_sample_abundance/Auto_sample_abundance_summary.csv
+#   sn_outs/cell_states/sample_abundance/tables/sample_abundance_summary.csv
+#   sn_outs/cell_states/sample_abundance/logs/plot_state_sample_abundance.log
+#
+# Usage:
+#   Rscript analysis/cell_states/plot_state_sample_abundance.R
 ####################
 
 library(Seurat)
@@ -12,10 +38,31 @@ library(tidyr)
 library(scales)
 library(patchwork)
 
-setwd("/rds/general/ephemeral/project/tumourheterogeneity1/ephemeral/snSeq_Pipeline/sn_outs")
+source("/rds/general/ephemeral/project/tumourheterogeneity1/ephemeral/snSeq_Pipeline/analysis/lib/config.R")
+source(file.path(ANALYSIS_DIR, "lib", "state_helpers.R"))
+source(file.path(ANALYSIS_DIR, "lib", "logging.R"))
+
+setwd(SN_OUTS_DIR)
 task_prefix <- "task3"
 out_dir <- file.path(getwd(), paste0(task_prefix, "_sample_abundance"))
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+output_dirs <- ensure_output_dirs("cell_states/sample_abundance")
+
+run_summary <- start_run_summary(
+  script = "analysis/cell_states/plot_state_sample_abundance.R",
+  inputs = c(
+    file.path(SN_OUTS_DIR, "snSeq_malignant_epi.rds"),
+    file.path(SN_OUTS_DIR, "Auto_final_states.rds"),
+    file.path(SN_OUTS_DIR, "Auto_topmp_v2_noreg_mp_adj.rds"),
+    file.path(SN_OUTS_DIR, "Metaprogrammes_Results", "geneNMF_metaprograms_nMP_19.rds"),
+    file.path(SN_OUTS_DIR, "Metaprogrammes_Results", "UCell_nMP19_filtered.rds")
+  ),
+  outputs = c(
+    file.path(out_dir, "Auto_task3_sample_abundance.pdf"),
+    file.path(out_dir, "Auto_sample_abundance_summary.csv")
+  ),
+  parameters = list(state_method = PREFERRED_STATE_DEFINITION$label)
+)
 
 ####################
 # load data
@@ -31,44 +78,9 @@ mp_adj_noncc <- readRDS("Auto_topmp_v2_noreg_mp_adj.rds")
 geneNMF.metaprograms <- readRDS("Metaprogrammes_Results/geneNMF_metaprograms_nMP_19.rds")
 ucell_scores <- readRDS("Metaprogrammes_Results/UCell_nMP19_filtered.rds")
 
-####################
-# constants
-####################
-mp_descriptions <- c(
-  "MP1"  = "G2M Cell Cycle",
-  "MP9"  = "G1S Cell Cycle",
-  "MP2"  = "MYC-related Proliferation",
-  "MP17" = "Basal-like Transition",
-  "MP14" = "Hypoxia Adapted Epi.",
-  "MP5"  = "Epithelial IFN Resp.",
-  "MP10" = "Columnar Diff.",
-  "MP8"  = "Intestinal Diff.",
-  "MP13" = "Hypoxic Inflam. Epi.",
-  "MP7"  = "DNA Damage Repair",
-  "MP18" = "Secretory Diff. (Intest.)",
-  "MP16" = "Secretory Diff. (Gastric)",
-  "MP15" = "Immune Infiltration",
-  "MP12" = "Neuro-responsive Epi"
-)
-
-state_groups <- list(
-  "Classic Proliferative" = c("MP2"),
-  "Basal to Intestinal Metaplasia" = c("MP17", "MP14", "MP5", "MP10", "MP8"),
-  "Stress-adaptive" = c("MP13", "MP12"),
-  "SMG-like Metaplasia" = c("MP18", "MP16"),
-  "Immune Infiltrating" = c("MP15")
-)
-
-group_cols <- c(
-  "Classic Proliferative" = "#E41A1C",
-  "Basal to Intestinal Metaplasia" = "#4DAF4A",
-  "Stress-adaptive" = "#984EA3",
-  "SMG-like Metaplasia" = "#FF7F00",
-  "Immune Infiltrating" = "#377EB8",
-  "3CA_EMT_and_Protein_maturation" = "#666666",
-  "Unresolved" = "grey80",
-  "Hybrid" = "black"
-)
+mp_descriptions <- MP_DESCRIPTIONS
+state_groups <- STATE_GROUPS
+group_cols <- STATE_COLORS
 
 mp_cols <- c(
   "MP1_G2M Cell Cycle" = "#B0B0B0",
@@ -90,38 +102,6 @@ mp_cols <- c(
 ####################
 # helpers
 ####################
-z_normalise <- function(mat, sample_var, study_var) {
-  clust_df <- as.data.frame(mat)
-  clust_df$.cell <- rownames(mat)
-  clust_df$.sample <- sample_var[rownames(mat)]
-  clust_df$.study <- study_var[rownames(mat)]
-  study_sd <- clust_df %>%
-    group_by(.study) %>%
-    summarise(across(all_of(colnames(mat)), ~ sd(.x, na.rm = TRUE)), .groups = "drop") %>%
-    tibble::column_to_rownames(".study") %>%
-    as.matrix()
-  study_sd[is.na(study_sd) | study_sd == 0] <- 1
-  clust_centered <- clust_df %>%
-    group_by(.sample) %>%
-    mutate(across(all_of(colnames(mat)), ~ .x - mean(.x, na.rm = TRUE))) %>%
-    ungroup()
-  mp_adj <- as.matrix(clust_centered[, colnames(mat), drop = FALSE])
-  rownames(mp_adj) <- clust_centered$.cell
-  for (mp in colnames(mp_adj)) {
-    mp_adj[, mp] <- mp_adj[, mp] / study_sd[clust_centered$.study, mp]
-  }
-  mp_adj[!is.finite(mp_adj)] <- 0
-  mp_adj
-}
-
-label_mp <- function(mp_vec) {
-  desc <- mp_descriptions[mp_vec]
-  desc[is.na(desc)] <- mp_vec[is.na(desc)]
-  out <- paste0(mp_vec, "_", desc)
-  names(out) <- names(mp_vec)
-  out
-}
-
 make_prop_data <- function(label_vec, sample_vec, all_labels) {
   df <- data.frame(
     orig.ident = as.character(sample_vec),
@@ -243,7 +223,7 @@ mp_adj_noncc <- as.matrix(mp_adj_noncc[common_cells, , drop = FALSE])
 sample_var <- tmdata_all$orig.ident
 study_var <- tmdata_all$reference_batch
 
-cc_mps <- c("MP1", "MP7", "MP9")
+cc_mps <- CC_MPS
 cc_in_ucell <- intersect(cc_mps, colnames(ucell_scores))
 cc_raw <- as.matrix(ucell_scores[common_cells, cc_in_ucell, drop = FALSE])
 mp_adj_cc <- z_normalise(cc_raw, sample_var, study_var)
@@ -492,4 +472,15 @@ write.csv(
   summary_df,
   file.path(out_dir, "Auto_sample_abundance_summary.csv"),
   row.names = FALSE
+)
+write.csv(
+  summary_df,
+  file.path(output_dirs["tables"], "sample_abundance_summary.csv"),
+  row.names = FALSE
+)
+
+run_summary <- finish_run_summary(run_summary, status = "ok")
+write_run_summary(
+  run_summary,
+  file.path(output_dirs["logs"], "plot_state_sample_abundance.log")
 )

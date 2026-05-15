@@ -1,3 +1,36 @@
+####################
+# Analysis registry:
+#   Status: active terminal figure-generation
+#   Script: analysis/qc/qc_heatmap.R
+#   Methodology: analysis/methodology/qc/qc_heatmap_methodology.md
+#   Map: analysis/ANALYSIS_MAP.md
+#   Output tiers: sn_outs/qc/heatmaps/{intermediate,tables,figures,logs,reports}
+####################
+
+####################
+# qc_heatmap.R
+#
+# Generate scRef-style QC heatmaps before and after expression filtering using
+# the current snRNA-seq marker panel and QC thresholds.
+#
+# Input:
+#   sn_outs/sample_manifest.csv
+#   sn_outs/filtered_sample_summary.csv
+#   sn_outs/expression_filter_markers.csv
+#   sn_outs/by_samples/<sample>/<sample>.rds
+#   sn_outs/by_samples/<sample>/<sample>_anno.rds
+#
+# Output:
+#   sn_outs/Auto_QC_snSeq_prefilter.png
+#   sn_outs/Auto_QC_snSeq_final.png
+#   sn_outs/Auto_QC_snSeq_heatmaps.pdf
+#   sn_outs/Auto_qc_heatmap_stage_summary.csv
+#   sn_outs/qc/heatmaps/{figures,reports,tables,logs}/...
+#
+# Usage:
+#   Rscript analysis/qc/qc_heatmap.R
+####################
+
 suppressPackageStartupMessages({
   library("Seurat")
   library("dplyr")
@@ -13,13 +46,28 @@ file_arg <- grep("^--file=", args, value = TRUE)
 script_path <- if (length(file_arg) > 0) {
   normalizePath(sub("^--file=", "", file_arg[1]))
 } else {
-  normalizePath("/rds/general/ephemeral/project/tumourheterogeneity1/ephemeral/snSeq_Pipeline/analysis/plotting/qc_heatmap.R")
+  normalizePath("/rds/general/ephemeral/project/tumourheterogeneity1/ephemeral/snSeq_Pipeline/analysis/qc/qc_heatmap.R")
 }
 
 analysis_dir <- dirname(script_path)
 project_dir <- normalizePath(file.path(analysis_dir, "..", ".."))
 out_dir <- file.path(project_dir, "sn_outs")
 setwd(out_dir)
+
+source(file.path(project_dir, "analysis", "lib", "config.R"))
+source(file.path(ANALYSIS_DIR, "lib", "logging.R"))
+
+output_dirs <- ensure_output_dirs("qc/heatmaps")
+run_summary <- start_run_summary(
+  script = "analysis/qc/qc_heatmap.R",
+  inputs = file.path(out_dir, c("sample_manifest.csv", "filtered_sample_summary.csv", "expression_filter_markers.csv")),
+  outputs = c(
+    file.path(out_dir, "Auto_QC_snSeq_prefilter.png"),
+    file.path(out_dir, "Auto_QC_snSeq_final.png"),
+    file.path(out_dir, "Auto_QC_snSeq_heatmaps.pdf")
+  ),
+  parameters = list(qc_thresholds = QC_THRESHOLDS)
+)
 
 required_files <- c(
   "sample_manifest.csv",
@@ -544,6 +592,7 @@ summary_tbl <- bind_rows(
 )
 
 write.csv(summary_tbl, "Auto_qc_heatmap_stage_summary.csv", row.names = FALSE)
+write.csv(summary_tbl, file.path(output_dirs["tables"], "qc_heatmap_stage_summary.csv"), row.names = FALSE)
 
 png("Auto_QC_snSeq_prefilter.png", width = 80, height = 50, units = "in", res = 400)
 plot_heatmap(
@@ -574,3 +623,13 @@ plot_heatmap(
   reorder = TRUE
 )
 dev.off()
+
+file.copy("Auto_QC_snSeq_prefilter.png", file.path(output_dirs["figures"], "Auto_QC_snSeq_prefilter.png"), overwrite = TRUE)
+file.copy("Auto_QC_snSeq_final.png", file.path(output_dirs["figures"], "Auto_QC_snSeq_final.png"), overwrite = TRUE)
+file.copy("Auto_QC_snSeq_heatmaps.pdf", file.path(output_dirs["reports"], "Auto_QC_snSeq_heatmaps.pdf"), overwrite = TRUE)
+
+run_summary <- finish_run_summary(run_summary, status = "ok")
+write_run_summary(
+  run_summary,
+  file.path(output_dirs["logs"], "qc_heatmap.log")
+)

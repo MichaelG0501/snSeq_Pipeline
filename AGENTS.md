@@ -9,11 +9,15 @@ Single-nucleus / single-cell RNA-seq QC and analysis pipeline for the ITH all-sa
 *_master.sh      — PBS orchestrators for per-sample steps
 N_<Step>.sh      — PBS job scripts for each pipeline step
 Auto_*.sh        — Auxiliary PBS helpers for review / diagnostics
-analysis/summary/    — Step-4 summary plotting scripts and outputs
-analysis/plotting/   — QC heatmap and cohort-level plotting helpers
+analysis/summary/    — Step-4 summary plotting scripts; outputs go under `sn_outs/summary/`
+analysis/qc/         — QC heatmap and cohort-level plotting helpers
 analysis/annotation/ — Annotation review plotting scripts and outputs
+analysis/infercna/   — InferCNA / malignancy audit and plotting scripts
 analysis/cell_states/ — Malignant epithelial state-mapping scripts and outputs
-analysis/methodology/ — Workspace methodology write-up
+analysis/legacy/     — Legacy comparison scripts not used downstream
+analysis/lib/        — Shared analysis configuration, constants, logging, and helpers
+analysis/methodology/ — Workspace and per-script methodology write-ups
+analysis/ANALYSIS_MAP.md — Analysis dependency, run-order, and location map
 sn_outs/         — All pipeline outputs for this workspace
 temp/            — Optional PBS stdout/stderr staging area
 AGENTS.md        — Workspace rules and execution guidance
@@ -39,8 +43,8 @@ The current pipeline must **not** reuse precomputed annotation or downstream res
 | 4 | `4_Expr_filtering.sh` | `Expr_filtering.R` | All samples | `dmtcp` |
 | 5 | `5_master.sh` → `5_InferCNA.sh` | `InferCNA.R` | Per-sample | `dmtcp` |
 | 6 | `6_master.sh` → `6_Malignancy.sh` | `Malignancy.R` | Per-sample | `dmtcp` |
-| 7 | `8_geneNMF.sh` | `geneNMF.R` | All malignant epithelial cells | `dmtcp` |
-| 8 | `Auto_cell_states.sh` | `analysis/cell_states/*.R` | All malignant epithelial cells | `dmtcp` |
+| 7 | `8_geneNMF.sh` | `analysis/cell_states/prepare_malignant_epithelial_ucell.R` | All malignant epithelial cells | `dmtcp` |
+| 8 | `cell_states_master.sh` | `analysis/cell_states/assign_states_approach_b_noreg.R` and downstream state plotting scripts | All malignant epithelial cells | `dmtcp` |
 
 All persistent outputs for this workspace go under `sn_outs/`.
 
@@ -62,11 +66,10 @@ qsub 3_Annotation.sh
 qsub 4_Expr_filtering.sh
 
 # Annotation review PDF
-# Annotation review PDF (edit parameters directly in the R script)
-qsub Auto_annotation_featureplots.sh
+Rscript analysis/annotation/plot_annotation_featureplots.R sample_mode=subset n_samples=10 sample_seed=1
 
 # Cohort QC heatmaps (post-QC/pre-expression-filter and final filtered)
-qsub Auto_qc_heatmap.sh
+Rscript analysis/qc/qc_heatmap.R
 
 # Step 5 per-sample inferCNA
 qsub 5_master.sh
@@ -75,13 +78,13 @@ qsub 5_master.sh
 qsub 6_master.sh
 
 # Step-6 integrity verification
-Rscript analysis/cell_states/Auto_verify_malignancy_results.R
+Rscript analysis/infercna/verify_malignancy_integrity.R
 
 # Step 7 malignant epithelial merge + UCell scoring
 qsub 8_geneNMF.sh
 
 # Step 8 state mapping / visualisation
-qsub Auto_cell_states.sh
+qsub cell_states_master.sh
 
 # Manual per-sample submission
 qsub -v sample="A_post_T1_biopsy" -N A_post_T1_biopsy 5_InferCNA.sh
@@ -103,7 +106,7 @@ These rules are inherited from the reference workspace and remain mandatory here
 3. **Interactive first**: tasks under 8 cores / 64 GB should default to `.R` script changes only when the user wants interactive execution.
 4. **PBS required**: heavy tasks must have PBS `.sh` wrappers with `#PBS` resource headers.
 5. **Live Logging**: Always use live streaming log file mode by adding `#PBS -koed` to the submission script. This ensures standard out and standard error are written to their final destination as the job is running, allowing for real-time monitoring from login nodes.
-6. **File naming**: new persistent helper files should be prefixed with `Auto_` unless they are part of the agreed pipeline step contract.
+6. **File naming**: outside `analysis/`, new persistent helper files should be prefixed with `Auto_` unless they are part of the agreed pipeline step contract. Inside `analysis/`, follow the Analysis Folder Rules below.
 7. **Modifying existing files**: when extending existing R code, wrap substantial new blocks in 20-hash comment delimiters.
 8. **No destructive cleanup**: do not delete, move, or overwrite user data outside this working directory.
 9. **Ephemeral test scripts**: temporary debug scripts should use disposable names and should not become part of the pipeline contract.
@@ -127,14 +130,29 @@ These rules are inherited from the reference workspace and remain mandatory here
 14. **No fallback references**: if the required per-batch reference is missing or insufficient, fail that sample explicitly; do not substitute a global or patient-level reference.
 15. **Cell-level filtering**: expression filtering and malignancy decisions are cell-level operations; sample-level status files are orchestration markers only.
 16. **Expression-filter rescue**: step 4 currently allows a resolved lineage to pass marker support with either the standard `>=2` detected markers at the normal threshold or a single very strong assigned-lineage marker.
-17. **Summary integrity**: `analysis/summary/summary.R` must stop if `snSeq_merged.rds` contains legacy cell types or if final cell-type counts do not sum to the merged cell count.
-18. **Annotation review PDF**: `analysis/annotation/annotation_featureplots.R` must reflect the current implemented scoring logic from `Clustering.R`, `Annotation.R`, and the current expression-filter marker panel; do not replace it with ad hoc marker averages.
+17. **Summary integrity**: `analysis/summary/expression_filter_summary.R` must stop if `snSeq_merged.rds` contains legacy cell types or if final cell-type counts do not sum to the merged cell count.
+18. **Annotation review PDF**: `analysis/annotation/plot_annotation_featureplots.R` must reflect the current implemented scoring logic from `Clustering.R`, `Annotation.R`, and the current expression-filter marker panel; do not replace it with ad hoc marker averages.
 19. **Annotation sample selection**: the annotation plotting wrapper defaults to a random subset of 10 samples; use PBS variables to switch to `all` or a different subset size/seed.
 20. **Annotation color stability**: lineage colors in annotation plots must be fixed and reused consistently across `celltype_initial`, `celltype_update`, and lineage score panels.
-21. **Downstream malignant merge scope**: `geneNMF.R` must only use samples whose `expr_filter_status`, `infercna_status`, and `malignancy_status` are all `ok`, and it must merge only `malignant_level_1` and `malignant_level_2` epithelial cells.
+21. **Downstream malignant merge scope**: `analysis/cell_states/prepare_malignant_epithelial_ucell.R` must only use samples whose `expr_filter_status`, `infercna_status`, and `malignancy_status` are all `ok`, and it must merge only `malignant_level_1` and `malignant_level_2` epithelial cells.
 22. **State-analysis batch field**: downstream state scripts must use `reference_batch` as the study replacement for normalization and plotting order; do not branch on `technology`.
 23. **noreg only for snRNA-seq**: snRNA-seq state mapping uses the `noreg` workflow only. Ignore the `reg` branch from the scRef workspace.
 24. **Unresolved relabel constraint**: unresolved relabelling must use the fixed scRef-retained 3CA metaprograms and must not re-derive a new retained 3CA set from the snRNA-seq cohort.
+
+### Analysis Folder Rules
+
+1. **Headers required**: every R analysis script must start with a 20-hash-delimited header that states status, script path, methodology path, analysis-map path, description, inputs, outputs, and usage.
+2. **Methodology required**: every analysis script must have a matching methodology file under `analysis/methodology/<same-subfolder>/<script>_methodology.md`.
+3. **Map required**: any new, renamed, legacy, or deleted analysis script must update `analysis/ANALYSIS_MAP.md` with dependencies, run order, terminal/legacy status, and downstream consumers.
+4. **No ambiguous names**: active analysis scripts should use descriptive names without `Auto_`. Scripts retained only for comparison must use `legacy_prefix_`. Scripts proposed for manual deletion must use `delete_prefix_`.
+5. **Current state method**: the active state workflow is Approach B, `noreg`; shared constants live in `analysis/lib/config.R`.
+6. **No legacy downstream outputs**: legacy scripts must write only under `sn_outs/legacy/...` and must not produce files consumed by active downstream scripts.
+7. **Output tiers**: new outputs should be placed under `intermediate/`, `tables/`, `figures/`, `logs/`, or `reports/`. Root-level `sn_outs/` outputs are allowed only when they are existing canonical downstream compatibility files.
+8. **Cacheable plotting**: long-running scripts must save computational intermediates under `intermediate/` and provide a documented option such as `plot_only=true` so visual styling can be regenerated without recomputing results.
+9. **Logging**: long-running or reporting scripts must write a lightweight log under `logs/` containing start/end time, inputs, outputs, parameters, cache reuse, and session information where relevant.
+10. **Shared helpers**: repeated constants/functions must be added to `analysis/lib/` instead of copied between scripts. Current shared files are `config.R`, `io_helpers.R`, `logging.R`, `state_helpers.R`, and `plot_helpers.R`.
+11. **Presentation figures**: plots intended for slides must use readable font sizes, legends, row/column labels, and point sizes relative to figure dimensions. Avoid tiny heatmap row names or legends that cannot be read in PPTX.
+12. **External dependencies**: scripts that require external files, reference databases, downloads, or upstream project outputs must list those paths in the script header and methodology.
 
 ### PBS Job Template
 
@@ -194,8 +212,8 @@ Expected step outputs include:
 - `<sample>_outs.rds` — inferCNA output
 - `<sample>_signatures.rds` — optional per-sample tumour signature genes
 - `no_ref`, `no_epi`, `no_cell` — sentinel markers for skipped samples
-- `analysis/summary/*.png|*.pdf` — step-4 acceptance plots
-- `analysis/summary/pair3_umap_celltype_technology.png` — publication-style summary UMAP pair showing final cell type and technology
+- `sn_outs/summary/expression_filter/figures/*.png` and `sn_outs/summary/expression_filter/reports/*.pdf` — step-4 acceptance plots
+- `sn_outs/summary/expression_filter/figures/pair3_umap_celltype_technology.png` — publication-style summary UMAP pair showing final cell type and technology
 - `sn_outs/Auto_QC_snSeq_prefilter.png` — scRef-style cohort QC heatmap after QC but before expression filtering
 - `sn_outs/Auto_QC_snSeq_final.png` — scRef-style cohort QC heatmap after final singlet / marker filtering
 - `sn_outs/Auto_QC_snSeq_heatmaps.pdf` — two-page combined QC heatmap report
@@ -216,6 +234,8 @@ Expected step outputs include:
 - `task4_unresolved_states/*` — unresolved relabelling tables and plots
 - `task3_sample_abundance/*` — per-sample abundance plots and summaries
 - `task6_hybrid_pairwise/*` — pairwise hybrid node-plot outputs
+- `cell_states/*/{intermediate,tables,figures,logs,reports}` — tiered cell-state outputs and logs
+- `infercna/*/{intermediate,tables,figures,logs,reports}` — tiered InferCNA/malignancy review outputs and logs
 - `Auto_malignancy_integrity_by_sample.csv` — per-sample malignancy integrity audit
 - `Auto_malignancy_integrity_summary.csv` — summary malignancy integrity audit
 

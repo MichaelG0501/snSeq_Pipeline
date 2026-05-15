@@ -1,6 +1,30 @@
 ####################
-# Integrated into snSeq_Pipeline
-# Adapted from scRef_Pipeline/analysis/cnv/cnv_subsetting.R
+# Analysis registry:
+#   Status: active terminal figure-generation
+#   Script: analysis/infercna/plot_merged_cnv_profile.R
+#   Methodology: analysis/methodology/infercna/plot_merged_cnv_profile_methodology.md
+#   Map: analysis/ANALYSIS_MAP.md
+#   Output tiers: sn_outs/infercna/cnv_profile/{intermediate,tables,figures,logs,reports}
+####################
+
+####################
+# plot_merged_cnv_profile.R
+#
+# Plot a merged InferCNA profile from completed final epithelial malignancy
+# objects. This script requires step-6 `_epi_f.rds` files with a `malignancy`
+# metadata column; it does not recreate or fallback to older malignancy logic.
+#
+# Input:
+#   sn_outs/by_samples/<sample>/<sample>_epi_f.rds
+#   sn_outs/by_samples/<sample>/<sample>_outs.rds
+#   /rds/general/project/spatialtranscriptomics/live/ITH_all/all_samples/hg38_gencode_v27.txt
+#
+# Output:
+#   sn_outs/infercna/cnv_profile/figures/snseq_merged_cnv_profile.pdf
+#   sn_outs/infercna/cnv_profile/logs/plot_merged_cnv_profile.log
+#
+# Usage:
+#   Rscript analysis/infercna/plot_merged_cnv_profile.R
 ####################
 suppressPackageStartupMessages({
   library(data.table)
@@ -14,8 +38,21 @@ suppressPackageStartupMessages({
   library(ggplot2)
 })
 
-# Set working directory to sn_outs
-setwd("/rds/general/ephemeral/project/tumourheterogeneity1/ephemeral/snSeq_Pipeline/sn_outs")
+source("/rds/general/ephemeral/project/tumourheterogeneity1/ephemeral/snSeq_Pipeline/analysis/lib/config.R")
+source(file.path(ANALYSIS_DIR, "lib", "logging.R"))
+
+setwd(SN_OUTS_DIR)
+output_dirs <- ensure_output_dirs("infercna/cnv_profile")
+run_summary <- start_run_summary(
+  script = "analysis/infercna/plot_merged_cnv_profile.R",
+  inputs = c(
+    file.path(SN_OUTS_DIR, "by_samples/<sample>/<sample>_epi_f.rds"),
+    file.path(SN_OUTS_DIR, "by_samples/<sample>/<sample>_outs.rds"),
+    "/rds/general/project/spatialtranscriptomics/live/ITH_all/all_samples/hg38_gencode_v27.txt"
+  ),
+  outputs = file.path(output_dirs["figures"], "snseq_merged_cnv_profile.pdf"),
+  parameters = list(stage = "terminal_cnv_profile", requires_final_malignancy = TRUE)
+)
 
 sample_dirs <- list.dirs(path = "by_samples/", full.names = FALSE, recursive = FALSE)
 
@@ -35,18 +72,12 @@ message("Collecting epithelial and reference cells from samples...")
 for (sample in sample_dirs) {
   
   epi_file_f <- file.path("by_samples", sample, paste0(sample, "_epi_f.rds"))
-  epi_file   <- file.path("by_samples", sample, paste0(sample, "_epi.rds"))
   outs_file  <- file.path("by_samples", sample, paste0(sample, "_outs.rds"))
   
   if (!file.exists(outs_file)) next
   
-  if (file.exists(epi_file_f)) {
-    epi <- readRDS(epi_file_f)
-  } else if (file.exists(epi_file)) {
-    epi <- readRDS(epi_file)
-  } else {
-    next
-  }
+  if (!file.exists(epi_file_f)) next
+  epi <- readRDS(epi_file_f)
   
   outs <- readRDS(outs_file)
   
@@ -58,49 +89,8 @@ for (sample in sample_dirs) {
   meta_epi <- meta_epi[common_cells, ]
   outs_epi <- outs[, common_cells, drop = FALSE]
   
-  # Ensure cc_score and cs_score exist
-  if (!"cc_score" %in% colnames(meta_epi)) meta_epi$cc_score <- 0
-  if (!"cs_score" %in% colnames(meta_epi)) meta_epi$cs_score <- 0
-  
-  # Fallback malignancy logic if not present (logic from Malignancy.R)
   if (!"malignancy" %in% colnames(meta_epi)) {
-    message("Malignancy column missing for ", sample, " - applying fallback logic...")
-    meta_epi$malignancy <- "unresolved"
-    
-    # Requirement for fallback: classification and malignant_clus must exist (from Step 5)
-    if ("classification" %in% colnames(meta_epi) && "malignant_clus" %in% colnames(meta_epi)) {
-      cc_thr <- 1
-      cs_thr <- 1
-      
-      cluster_col <- if ("seurat_clusters" %in% colnames(meta_epi)) "seurat_clusters" else "res.0.8"
-      if (cluster_col %in% colnames(meta_epi)) {
-        cluster_labels <- tapply(meta_epi$malignant_clus, meta_epi[[cluster_col]], function(x) {
-          if (all(x == "malignant_clus", na.rm = TRUE)) "malignant_clus"
-          else if (all(x == "non_malignant_clus", na.rm = TRUE)) "non_malignant_clus"
-          else "unresolved_clus"
-        })
-        
-        for (cl in names(cluster_labels)) {
-          cells_in_cl <- meta_epi[[cluster_col]] == cl
-          if (cluster_labels[cl] == "non_malignant_clus") {
-             meta_epi$malignancy[cells_in_cl & meta_epi$classification == "cna_non_malignant"] <- "non_malignant_level_1"
-             meta_epi$malignancy[cells_in_cl & meta_epi$classification == "cna_unresolved"] <- "non_malignant_level_2"
-             meta_epi$malignancy[cells_in_cl & meta_epi$classification == "cna_malignant"] <- "non_malignant_unresolved"
-          } else {
-             is_malig <- cells_in_cl & (
-               meta_epi$classification == "cna_malignant" | 
-               meta_epi$cc_score >= cc_thr | 
-               meta_epi$cs_score >= cs_thr
-             )
-             if (sum(is_malig) / sum(cells_in_cl) >= 0.5) {
-               meta_epi$malignancy[cells_in_cl & meta_epi$classification == "cna_malignant"] <- "malignant_level_1"
-               meta_epi$malignancy[cells_in_cl & meta_epi$classification == "cna_unresolved"] <- "malignant_level_2"
-               meta_epi$malignancy[cells_in_cl & meta_epi$classification == "cna_non_malignant"] <- "malignant_unresolved"
-             }
-          }
-        }
-      }
-    }
+    stop("Missing final `malignancy` metadata in ", epi_file_f, ". Run step 6 before this plotting script.")
   }
   
   # rename malignancy levels
@@ -292,8 +282,14 @@ ht <- Heatmap(
   }
 )
 
-pdf("snseq_merged_cnv_profile.pdf", width = 10, height = 8)
+pdf(file.path(output_dirs["figures"], "snseq_merged_cnv_profile.pdf"), width = 10, height = 8)
 draw(ht)
 dev.off()
 
-message("Done! Saved to sn_outs/snseq_merged_cnv_profile.pdf")
+run_summary <- finish_run_summary(run_summary, status = "ok")
+write_run_summary(
+  run_summary,
+  file.path(output_dirs["logs"], "plot_merged_cnv_profile.log")
+)
+
+message("Done! Saved to sn_outs/infercna/cnv_profile/figures/snseq_merged_cnv_profile.pdf")

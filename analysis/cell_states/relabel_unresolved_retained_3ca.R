@@ -1,8 +1,43 @@
 ####################
-# Auto_unresolved_relabel.R
-# Relabel unresolved noreg Approach-B cells using the scRef-retained 3CA MPs
-# and regenerate the scRef-style proportion, boxplot, and heatmap outputs for
-# the snRNA-seq malignant epithelial dataset.
+# Analysis registry:
+#   Status: active
+#   Script: analysis/cell_states/relabel_unresolved_retained_3ca.R
+#   Methodology: analysis/methodology/cell_states/relabel_unresolved_retained_3ca_methodology.md
+#   Map: analysis/ANALYSIS_MAP.md
+#   Output tiers: sn_outs/cell_states/unresolved_relabel/{intermediate,tables,figures,logs,reports}
+####################
+
+####################
+# relabel_unresolved_retained_3ca.R
+#
+# Finalize the selected Approach-B noreg state labels by reconsidering only
+# cells initially labelled Unresolved. Relabelling uses the fixed retained
+# scRef 3CA metaprograms and does not re-derive a new retained 3CA set from
+# this snRNA-seq cohort.
+#
+# Input:
+#   sn_outs/snSeq_malignant_epi.rds
+#   sn_outs/Auto_topmp_v2_noreg_states_B.rds
+#   sn_outs/Auto_topmp_v2_noreg_mp_adj.rds
+#   sn_outs/UCell_3CA_MPs.rds
+#   sn_outs/Metaprogrammes_Results/geneNMF_metaprograms_nMP_19.rds
+#   sn_outs/Metaprogrammes_Results/UCell_nMP19_filtered.rds
+#   sn_outs/snSeq_malignant_epi_cc_score.rds
+#
+# Output:
+#   sn_outs/Auto_final_states.rds
+#   sn_outs/task4_unresolved_states/Auto_task4_unresolved_relabel_states.rds
+#   sn_outs/task4_unresolved_states/Auto_task4_unresolved_relabel_mp_coverage.csv
+#   sn_outs/task4_unresolved_states/Auto_task4_unresolved_relabel_proportion.pdf
+#   sn_outs/task4_unresolved_states/Auto_task4_unresolved_relabel_cc_boxplot.pdf
+#   sn_outs/task4_unresolved_states/Auto_task4_unresolved_relabel_heatmap.pdf
+#   sn_outs/task4_unresolved_states/Auto_task4_unresolved_relabel_summary.csv
+#   sn_outs/cell_states/unresolved_relabel/intermediate/unresolved_relabel_cache.rds
+#   sn_outs/cell_states/unresolved_relabel/logs/relabel_unresolved_retained_3ca.log
+#
+# Usage:
+#   Rscript analysis/cell_states/relabel_unresolved_retained_3ca.R
+#   Rscript analysis/cell_states/relabel_unresolved_retained_3ca.R plot_only=true
 ####################
 
 library(Seurat)
@@ -15,91 +50,51 @@ library(scales)
 library(patchwork)
 library(grid)
 
-setwd("/rds/general/ephemeral/project/tumourheterogeneity1/ephemeral/snSeq_Pipeline/sn_outs")
+source("/rds/general/ephemeral/project/tumourheterogeneity1/ephemeral/snSeq_Pipeline/analysis/lib/config.R")
+source(file.path(ANALYSIS_DIR, "lib", "state_helpers.R"))
+source(file.path(ANALYSIS_DIR, "lib", "io_helpers.R"))
+source(file.path(ANALYSIS_DIR, "lib", "logging.R"))
+
+setwd(SN_OUTS_DIR)
+args_kv <- parse_key_value_args()
+plot_only <- arg_flag(args_kv, "plot_only", FALSE)
 task_prefix <- "task4"
 out_dir <- file.path(getwd(), paste0(task_prefix, "_unresolved_states"))
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+output_dirs <- ensure_output_dirs("cell_states/unresolved_relabel")
+cache_path <- file.path(output_dirs["intermediate"], "unresolved_relabel_cache.rds")
 
-####################
-# constants
-####################
-state_groups <- list(
-  "Classic Proliferative" = c("MP2"),
-  "Basal to Intestinal Metaplasia" = c("MP17", "MP14", "MP5", "MP10", "MP8"),
-  "Stress-adaptive" = c("MP13", "MP12"),
-  "SMG-like Metaplasia" = c("MP18", "MP16"),
-  "Immune Infiltrating" = c("MP15")
-)
+state_groups <- STATE_GROUPS
+group_cols <- STATE_COLORS[names(STATE_COLORS) %in% c(names(STATE_GROUPS), "Unresolved", "Hybrid")]
+mp_descriptions <- MP_DESCRIPTIONS
+cc_mps <- CC_MPS
+retained_3ca_map <- RETAINED_3CA_STATE_MAP
 
-group_cols <- c(
-  "Classic Proliferative" = "#E41A1C",
-  "Basal to Intestinal Metaplasia" = "#4DAF4A",
-  "Stress-adaptive" = "#984EA3",
-  "SMG-like Metaplasia" = "#FF7F00",
-  "Immune Infiltrating" = "#377EB8",
-  "Unresolved" = "grey80",
-  "Hybrid" = "black"
-)
-
-mp_descriptions <- c(
-  "MP1"  = "G2M Cell Cycle",
-  "MP9"  = "G1S Cell Cycle",
-  "MP2"  = "MYC-related Proliferation",
-  "MP17" = "Basal-like Transition",
-  "MP14" = "Hypoxia Adapted Epi.",
-  "MP5"  = "Epithelial IFN Resp.",
-  "MP10" = "Columnar Diff.",
-  "MP8"  = "Intestinal Diff.",
-  "MP13" = "Hypoxic Inflam. Epi.",
-  "MP7"  = "DNA Damage Repair",
-  "MP18" = "Secretory Diff. (Intest.)",
-  "MP16" = "Secretory Diff. (Gastric)",
-  "MP15" = "Immune Infiltration",
-  "MP12" = "Neuro-responsive Epi"
-)
-
-cc_mps <- c("MP1", "MP7", "MP9")
-
-retained_3ca_map <- c(
-  "X3CA_mp_30.Respiration.1" = "Classic Proliferative",
-  "X3CA_mp_12.Protein.maturation" = "3CA_EMT_and_Protein_maturation",
-  "X3CA_mp_17.EMT.III" = "3CA_EMT_and_Protein_maturation"
+run_summary <- start_run_summary(
+  script = "analysis/cell_states/relabel_unresolved_retained_3ca.R",
+  inputs = c(
+    file.path(SN_OUTS_DIR, "snSeq_malignant_epi.rds"),
+    file.path(SN_OUTS_DIR, "Auto_topmp_v2_noreg_states_B.rds"),
+    file.path(SN_OUTS_DIR, "Auto_topmp_v2_noreg_mp_adj.rds"),
+    file.path(SN_OUTS_DIR, "UCell_3CA_MPs.rds"),
+    file.path(SN_OUTS_DIR, "Metaprogrammes_Results", "UCell_nMP19_filtered.rds")
+  ),
+  outputs = c(
+    file.path(SN_OUTS_DIR, "Auto_final_states.rds"),
+    file.path(out_dir, "Auto_task4_unresolved_relabel_states.rds"),
+    cache_path
+  ),
+  parameters = list(
+    state_method = PREFERRED_STATE_DEFINITION$label,
+    retained_3ca_map = retained_3ca_map,
+    plot_only = plot_only
+  ),
+  cached_reused = plot_only
 )
 
 ####################
 # helpers
 ####################
-z_normalise <- function(mat, sample_var, study_var) {
-  clust_df <- as.data.frame(mat)
-  clust_df$.cell <- rownames(mat)
-  clust_df$.sample <- sample_var[rownames(mat)]
-  clust_df$.study <- study_var[rownames(mat)]
-
-  study_sd <- clust_df %>%
-    group_by(.study) %>%
-    summarise(across(all_of(colnames(mat)), ~ sd(.x, na.rm = TRUE)), .groups = "drop") %>%
-    tibble::column_to_rownames(".study") %>%
-    as.matrix()
-  study_sd[is.na(study_sd) | study_sd == 0] <- 1
-
-  clust_centered <- clust_df %>%
-    group_by(.sample) %>%
-    mutate(across(all_of(colnames(mat)), ~ .x - mean(.x, na.rm = TRUE))) %>%
-    ungroup()
-
-  mp_adj <- as.matrix(clust_centered[, colnames(mat), drop = FALSE])
-  rownames(mp_adj) <- clust_centered$.cell
-  for (mp in colnames(mp_adj)) {
-    mp_adj[, mp] <- mp_adj[, mp] / study_sd[clust_centered$.study, mp]
-  }
-  mp_adj[!is.finite(mp_adj)] <- 0
-  mp_adj
-}
-
-clean_3ca_name <- function(x) {
-  x <- gsub("^X3CA_", "3CA_", x)
-  gsub("\\.", " ", x)
-}
 
 make_cna_palette <- function(cna_vec) {
   cna_levels <- sort(unique(as.character(cna_vec[!is.na(cna_vec)])))
@@ -178,49 +173,64 @@ names(sample_var) <- Cells(tmdata_all)
 names(study_var) <- Cells(tmdata_all)
 
 unresolved_cells <- names(state_B)[state_B == "Unresolved"]
-state_updated <- state_B
 
-if (length(unresolved_cells) > 0) {
-  CC_FIXED <- c(
-    "X3CA_mp_1.Cell.Cycle...G2.M",
-    "X3CA_mp_2.Cell.Cycle...G1.S",
-    "X3CA_mp_3.Cell.Cylce.HMG.rich",
-    "X3CA_mp_4.Chromatin",
-    "X3CA_mp_5.Cell.cycle.single.nucleus"
-  )
-
-  unresolved_3ca <- ucell_3ca[unresolved_cells, setdiff(colnames(ucell_3ca), CC_FIXED), drop = FALSE]
-  top_3ca_mp <- colnames(unresolved_3ca)[max.col(unresolved_3ca, ties.method = "first")]
-  names(top_3ca_mp) <- unresolved_cells
-  relabel_cells <- names(top_3ca_mp)[top_3ca_mp %in% names(retained_3ca_map)]
-  state_updated[relabel_cells] <- retained_3ca_map[top_3ca_mp[relabel_cells]]
-
-  coverage_df <- data.frame(
-    cell = unresolved_cells,
-    mp_label = top_3ca_mp,
-    orig.ident = as.character(sample_var[unresolved_cells]),
-    study = as.character(study_var[unresolved_cells]),
-    stringsAsFactors = FALSE
-  ) %>%
-    group_by(mp_label) %>%
-    summarise(
-      n_cells = n(),
-      n_samples = n_distinct(orig.ident),
-      n_studies = n_distinct(study),
-      pct_cells = 100 * n() / length(common_cells),
-      retained_from_scref = first(mp_label %in% names(retained_3ca_map)),
-      mapped_state = first(ifelse(mp_label %in% names(retained_3ca_map), retained_3ca_map[mp_label], "Unresolved")),
-      .groups = "drop"
-    ) %>%
-    arrange(desc(n_cells))
+if (plot_only) {
+  require_files(cache_path, label = "unresolved relabel cache")
+  cached <- readRDS(cache_path)
+  state_updated <- cached$state_updated
+  top_3ca_mp <- cached$top_3ca_mp
+  coverage_df <- cached$coverage_df
 } else {
-  top_3ca_mp <- character(0)
-  coverage_df <- data.frame()
+  state_updated <- state_B
+
+  if (length(unresolved_cells) > 0) {
+    unresolved_3ca <- ucell_3ca[
+      unresolved_cells,
+      setdiff(colnames(ucell_3ca), THREE_CA_CELL_CYCLE_MPS),
+      drop = FALSE
+    ]
+    top_3ca_mp <- colnames(unresolved_3ca)[max.col(unresolved_3ca, ties.method = "first")]
+    names(top_3ca_mp) <- unresolved_cells
+    relabel_cells <- names(top_3ca_mp)[top_3ca_mp %in% names(retained_3ca_map)]
+    state_updated[relabel_cells] <- retained_3ca_map[top_3ca_mp[relabel_cells]]
+
+    coverage_df <- data.frame(
+      cell = unresolved_cells,
+      mp_label = top_3ca_mp,
+      orig.ident = as.character(sample_var[unresolved_cells]),
+      study = as.character(study_var[unresolved_cells]),
+      stringsAsFactors = FALSE
+    ) %>%
+      group_by(mp_label) %>%
+      summarise(
+        n_cells = n(),
+        n_samples = n_distinct(orig.ident),
+        n_studies = n_distinct(study),
+        pct_cells = 100 * n() / length(common_cells),
+        retained_from_scref = first(mp_label %in% names(retained_3ca_map)),
+        mapped_state = first(ifelse(mp_label %in% names(retained_3ca_map), retained_3ca_map[mp_label], "Unresolved")),
+        .groups = "drop"
+      ) %>%
+      arrange(desc(n_cells))
+  } else {
+    top_3ca_mp <- character(0)
+    coverage_df <- data.frame()
+  }
+
+  saveRDS(
+    list(state_updated = state_updated, top_3ca_mp = top_3ca_mp, coverage_df = coverage_df),
+    cache_path
+  )
 }
 
 write.csv(
   coverage_df,
   file.path(out_dir, "Auto_task4_unresolved_relabel_mp_coverage.csv"),
+  row.names = FALSE
+)
+write.csv(
+  coverage_df,
+  file.path(output_dirs["tables"], "unresolved_relabel_mp_coverage.csv"),
   row.names = FALSE
 )
 
@@ -641,4 +651,20 @@ write.csv(
   ),
   file.path(out_dir, "Auto_task4_unresolved_relabel_summary.csv"),
   row.names = FALSE
+)
+write.csv(
+  data.frame(
+    n_cells_total = length(common_cells),
+    n_unresolved_input = length(unresolved_cells),
+    n_relabelled = sum(state_B == "Unresolved" & state_updated != "Unresolved"),
+    stringsAsFactors = FALSE
+  ),
+  file.path(output_dirs["tables"], "unresolved_relabel_summary.csv"),
+  row.names = FALSE
+)
+
+run_summary <- finish_run_summary(run_summary, status = "ok")
+write_run_summary(
+  run_summary,
+  file.path(output_dirs["logs"], "relabel_unresolved_retained_3ca.log")
 )

@@ -1,8 +1,40 @@
 ####################
-# Auto_states_topmpB_reg_noreg.R
-# Approach B workflow for the snRNA-seq malignant epithelial dataset.
-# This snRNA-seq implementation keeps the original scRef plotting and
-# annotation style, but runs only the noreg mode.
+# Analysis registry:
+#   Status: active
+#   Script: analysis/cell_states/assign_states_approach_b_noreg.R
+#   Methodology: analysis/methodology/cell_states/assign_states_approach_b_noreg_methodology.md
+#   Map: analysis/ANALYSIS_MAP.md
+#   Output tiers: sn_outs/cell_states/state_assignment/{intermediate,tables,figures,logs,reports}
+####################
+
+####################
+# assign_states_approach_b_noreg.R
+#
+# Assign malignant epithelial cells to the selected state definition:
+# Approach B, noreg. Scores are centered by sample and scaled by
+# reference_batch, then cell states are called from grouped scRef
+# metaprograms with explicit Unresolved and Hybrid thresholds.
+#
+# Input:
+#   sn_outs/snSeq_malignant_epi.rds
+#   sn_outs/Metaprogrammes_Results/geneNMF_metaprograms_nMP_19.rds
+#   sn_outs/Metaprogrammes_Results/UCell_nMP19_filtered.rds
+#   sn_outs/snSeq_malignant_epi_cc_score.rds
+#
+# Output:
+#   sn_outs/Auto_topmp_v2_noreg_states_B.rds
+#   sn_outs/Auto_topmp_v2_noreg_mp_adj.rds
+#   sn_outs/Auto_topmp_v2_noreg_group_max.rds
+#   sn_outs/Auto_topmp_v2_noreg_heatmap_B_cconly.pdf
+#   sn_outs/Auto_topmp_v2_noreg_proportion_B_withpie.pdf
+#   sn_outs/Auto_topmp_v2_noreg_ccscore_boxplot_B.pdf
+#   sn_outs/Auto_topmp_v2_noreg_summary.csv
+#   sn_outs/cell_states/state_assignment/intermediate/approach_b_noreg_cache.rds
+#   sn_outs/cell_states/state_assignment/logs/assign_states_approach_b_noreg.log
+#
+# Usage:
+#   Rscript analysis/cell_states/assign_states_approach_b_noreg.R
+#   Rscript analysis/cell_states/assign_states_approach_b_noreg.R plot_only=true
 ####################
 
 library(Seurat)
@@ -15,7 +47,39 @@ library(patchwork)
 library(scales)
 library(grid)
 
-setwd("/rds/general/ephemeral/project/tumourheterogeneity1/ephemeral/snSeq_Pipeline/sn_outs")
+source("/rds/general/ephemeral/project/tumourheterogeneity1/ephemeral/snSeq_Pipeline/analysis/lib/config.R")
+source(file.path(ANALYSIS_DIR, "lib", "state_helpers.R"))
+source(file.path(ANALYSIS_DIR, "lib", "io_helpers.R"))
+source(file.path(ANALYSIS_DIR, "lib", "logging.R"))
+
+setwd(SN_OUTS_DIR)
+args_kv <- parse_key_value_args()
+plot_only <- arg_flag(args_kv, "plot_only", FALSE)
+output_dirs <- ensure_output_dirs("cell_states/state_assignment")
+cache_path <- file.path(output_dirs["intermediate"], "approach_b_noreg_cache.rds")
+
+run_summary <- start_run_summary(
+  script = "analysis/cell_states/assign_states_approach_b_noreg.R",
+  inputs = c(
+    file.path(SN_OUTS_DIR, "snSeq_malignant_epi.rds"),
+    file.path(SN_OUTS_DIR, "Metaprogrammes_Results", "geneNMF_metaprograms_nMP_19.rds"),
+    file.path(SN_OUTS_DIR, "Metaprogrammes_Results", "UCell_nMP19_filtered.rds"),
+    file.path(SN_OUTS_DIR, "snSeq_malignant_epi_cc_score.rds")
+  ),
+  outputs = c(
+    file.path(SN_OUTS_DIR, "Auto_topmp_v2_noreg_states_B.rds"),
+    file.path(SN_OUTS_DIR, "Auto_topmp_v2_noreg_mp_adj.rds"),
+    file.path(SN_OUTS_DIR, "Auto_topmp_v2_noreg_group_max.rds"),
+    cache_path
+  ),
+  parameters = list(
+    state_method = PREFERRED_STATE_DEFINITION$label,
+    threshold = STATE_THRESHOLDS$approach_b_min_best_score,
+    hybrid_gap = STATE_THRESHOLDS$approach_b_hybrid_gap,
+    plot_only = plot_only
+  ),
+  cached_reused = plot_only
+)
 
 ####################
 # load data
@@ -25,75 +89,10 @@ geneNMF.metaprograms <- readRDS("Metaprogrammes_Results/geneNMF_metaprograms_nMP
 ucell_scores <- readRDS("Metaprogrammes_Results/UCell_nMP19_filtered.rds")
 cc_score <- readRDS("snSeq_malignant_epi_cc_score.rds")
 
-####################
-# constants
-####################
-mp_descriptions <- c(
-  "MP1"  = "G2M Cell Cycle",
-  "MP9"  = "G1S Cell Cycle",
-  "MP2"  = "MYC-related Proliferation",
-  "MP17" = "Basal-like Transition",
-  "MP14" = "Hypoxia Adapted Epi.",
-  "MP5"  = "Epithelial IFN Resp.",
-  "MP10" = "Columnar Diff.",
-  "MP8"  = "Intestinal Diff.",
-  "MP13" = "Hypoxic Inflam. Epi.",
-  "MP7"  = "DNA Damage Repair",
-  "MP18" = "Secretory Diff. (Intest.)",
-  "MP16" = "Secretory Diff. (Gastric)",
-  "MP15" = "Immune Infiltration",
-  "MP12" = "Neuro-responsive Epi"
-)
-
-cc_mps <- c("MP1", "MP7", "MP9")
-
-state_groups <- list(
-  "Classic Proliferative" = c("MP2"),
-  "Basal to Intestinal Metaplasia" = c("MP17", "MP14", "MP5", "MP10", "MP8"),
-  "Stress-adaptive" = c("MP13", "MP12"),
-  "SMG-like Metaplasia" = c("MP18", "MP16"),
-  "Immune Infiltrating" = c("MP15")
-)
-
-group_cols <- c(
-  "Classic Proliferative" = "#E41A1C",
-  "Basal to Intestinal Metaplasia" = "#4DAF4A",
-  "Stress-adaptive" = "#984EA3",
-  "SMG-like Metaplasia" = "#FF7F00",
-  "Immune Infiltrating" = "#377EB8",
-  "Unresolved" = "grey80",
-  "Hybrid" = "black"
-)
-
-####################
-# helpers
-####################
-z_normalise <- function(mat, sample_var, study_var) {
-  clust_df <- as.data.frame(mat)
-  clust_df$.cell <- rownames(mat)
-  clust_df$.sample <- sample_var[rownames(mat)]
-  clust_df$.study <- study_var[rownames(mat)]
-
-  study_sd <- clust_df %>%
-    group_by(.study) %>%
-    summarise(across(all_of(colnames(mat)), ~ sd(.x, na.rm = TRUE)), .groups = "drop") %>%
-    tibble::column_to_rownames(".study") %>%
-    as.matrix()
-  study_sd[is.na(study_sd) | study_sd == 0] <- 1
-
-  clust_centered <- clust_df %>%
-    group_by(.sample) %>%
-    mutate(across(all_of(colnames(mat)), ~ .x - mean(.x, na.rm = TRUE))) %>%
-    ungroup()
-
-  mp_adj <- as.matrix(clust_centered[, colnames(mat), drop = FALSE])
-  rownames(mp_adj) <- clust_centered$.cell
-  for (mp in colnames(mp_adj)) {
-    mp_adj[, mp] <- mp_adj[, mp] / study_sd[clust_centered$.study, mp]
-  }
-  mp_adj[!is.finite(mp_adj)] <- 0
-  mp_adj
-}
+mp_descriptions <- MP_DESCRIPTIONS
+cc_mps <- CC_MPS
+state_groups <- STATE_GROUPS
+group_cols <- STATE_COLORS[names(STATE_COLORS) %in% c(names(STATE_GROUPS), "Unresolved", "Hybrid")]
 
 make_cna_palette <- function(cna_vec) {
   cna_levels <- sort(unique(as.character(cna_vec[!is.na(cna_vec)])))
@@ -360,42 +359,46 @@ cna_status <- as.character(tmdata_all@meta.data[common_cells, "classification"])
 names(cna_status) <- common_cells
 cna_palette <- make_cna_palette(cna_status)
 
-retained_in_ucell <- intersect(retained_mps, colnames(ucell_scores))
-cc_in_ucell <- intersect(cc_mps, retained_in_ucell)
-non_cc_in_ucell <- intersect(non_cc_mps, retained_in_ucell)
+if (plot_only) {
+  require_files(cache_path, label = "state-assignment cache")
+  cached <- readRDS(cache_path)
+  state_B <- cached$state_B
+  mp_adj_noncc <- cached$mp_adj_noncc
+  mp_adj_all <- cached$mp_adj_all
+  group_max <- cached$group_max
+} else {
+  retained_in_ucell <- intersect(retained_mps, colnames(ucell_scores))
+  cc_in_ucell <- intersect(cc_mps, retained_in_ucell)
+  non_cc_in_ucell <- intersect(non_cc_mps, retained_in_ucell)
 
-ucell_mat <- as.matrix(ucell_scores[, retained_in_ucell, drop = FALSE])
-Y_use <- ucell_mat[, non_cc_in_ucell, drop = FALSE]
-mp_adj_noncc <- z_normalise(Y_use, sample_var, study_var)
-cc_raw <- as.matrix(ucell_scores[common_cells, cc_in_ucell, drop = FALSE])
-mp_adj_cc <- z_normalise(cc_raw, sample_var, study_var)
-mp_adj_all <- cbind(mp_adj_noncc, mp_adj_cc)
+  ucell_mat <- as.matrix(ucell_scores[, retained_in_ucell, drop = FALSE])
+  Y_use <- ucell_mat[, non_cc_in_ucell, drop = FALSE]
+  mp_adj_noncc <- z_normalise(Y_use, sample_var, study_var)
+  cc_raw <- as.matrix(ucell_scores[common_cells, cc_in_ucell, drop = FALSE])
+  mp_adj_cc <- z_normalise(cc_raw, sample_var, study_var)
+  mp_adj_all <- cbind(mp_adj_noncc, mp_adj_cc)
 
-group_max <- sapply(state_groups, function(mps) {
-  mps_avail <- intersect(mps, colnames(mp_adj_noncc))
-  if (length(mps_avail) == 1) return(as.numeric(mp_adj_noncc[, mps_avail]))
-  apply(mp_adj_noncc[, mps_avail, drop = FALSE], 1, max)
-})
-group_max <- as.matrix(group_max)
-rownames(group_max) <- rownames(mp_adj_noncc)
+  group_max <- build_group_max(mp_adj_noncc, state_groups)
 
-THRESHOLD <- 0.5
-HYBRID_GAP_B <- 0.3
+  best_group_idx <- max.col(group_max, ties.method = "first")
+  best_group_val <- apply(group_max, 1, max)
+  base_state <- names(state_groups)[best_group_idx]
+  base_state[best_group_val < STATE_THRESHOLDS$approach_b_min_best_score] <- "Unresolved"
 
-best_group_idx <- max.col(group_max, ties.method = "first")
-best_group_val <- apply(group_max, 1, max)
-base_state <- names(state_groups)[best_group_idx]
-base_state[best_group_val < THRESHOLD] <- "Unresolved"
+  sorted_groups <- t(apply(group_max, 1, sort, decreasing = TRUE))
+  gap <- sorted_groups[, 1] - sorted_groups[, 2]
+  state_B <- base_state
+  state_B[(gap < STATE_THRESHOLDS$approach_b_hybrid_gap) & (base_state != "Unresolved")] <- "Hybrid"
+  names(state_B) <- rownames(group_max)
 
-sorted_groups <- t(apply(group_max, 1, sort, decreasing = TRUE))
-gap <- sorted_groups[, 1] - sorted_groups[, 2]
-state_B <- base_state
-state_B[(gap < HYBRID_GAP_B) & (base_state != "Unresolved")] <- "Hybrid"
-names(state_B) <- rownames(group_max)
-
-saveRDS(state_B, "Auto_topmp_v2_noreg_states_B.rds")
-saveRDS(mp_adj_noncc, "Auto_topmp_v2_noreg_mp_adj.rds")
-saveRDS(group_max, "Auto_topmp_v2_noreg_group_max.rds")
+  saveRDS(state_B, "Auto_topmp_v2_noreg_states_B.rds")
+  saveRDS(mp_adj_noncc, "Auto_topmp_v2_noreg_mp_adj.rds")
+  saveRDS(group_max, "Auto_topmp_v2_noreg_group_max.rds")
+  saveRDS(
+    list(state_B = state_B, mp_adj_noncc = mp_adj_noncc, mp_adj_all = mp_adj_all, group_max = group_max),
+    cache_path
+  )
+}
 
 ####################
 # outputs
@@ -429,4 +432,16 @@ write.csv(
   prop_plots$overall %>% transmute(state, cells = n, pct),
   "Auto_topmp_v2_noreg_summary.csv",
   row.names = FALSE
+)
+
+write.csv(
+  prop_plots$overall %>% transmute(state, cells = n, pct),
+  file.path(output_dirs["tables"], "approach_b_noreg_summary.csv"),
+  row.names = FALSE
+)
+
+run_summary <- finish_run_summary(run_summary, status = "ok")
+write_run_summary(
+  run_summary,
+  file.path(output_dirs["logs"], "assign_states_approach_b_noreg.log")
 )

@@ -1,3 +1,35 @@
+####################
+# Analysis registry:
+#   Status: active terminal figure-generation
+#   Script: analysis/summary/expression_filter_summary.R
+#   Methodology: analysis/methodology/summary/expression_filter_summary_methodology.md
+#   Map: analysis/ANALYSIS_MAP.md
+#   Output tiers: sn_outs/summary/expression_filter/{intermediate,tables,figures,logs,reports}
+####################
+
+####################
+# expression_filter_summary.R
+#
+# Summarize step-4 expression filtering and final merged-cell composition.
+# The script validates merged-object integrity and writes terminal summary
+# figures for review.
+#
+# Input:
+#   sn_outs/filtering_summary_sn.csv
+#   sn_outs/filtered_sample_summary.csv
+#   sn_outs/expression_filter_reason_overall.csv
+#   sn_outs/snSeq_merged.rds
+#   sn_outs/names_tmdata_sn.txt
+#
+# Output:
+#   sn_outs/summary/expression_filter/figures/*.png
+#   sn_outs/summary/expression_filter/reports/summary_overview.pdf
+#   sn_outs/summary/expression_filter/logs/expression_filter_summary.log
+#
+# Usage:
+#   Rscript analysis/summary/expression_filter_summary.R
+####################
+
 suppressPackageStartupMessages({
   library("dplyr")
   library("tidyr")
@@ -14,12 +46,30 @@ file_arg <- grep("^--file=", args, value = TRUE)
 script_path <- if (length(file_arg) > 0) {
   normalizePath(sub("^--file=", "", file_arg[1]))
 } else {
-  normalizePath("/rds/general/ephemeral/project/tumourheterogeneity1/ephemeral/snSeq_Pipeline/analysis/summary/summary.R")
+  normalizePath("/rds/general/ephemeral/project/tumourheterogeneity1/ephemeral/snSeq_Pipeline/analysis/summary/expression_filter_summary.R")
 }
 
 analysis_dir <- dirname(script_path)
 project_dir <- normalizePath(file.path(analysis_dir, "..", ".."))
 out_dir <- file.path(project_dir, "sn_outs")
+
+source(file.path(project_dir, "analysis", "lib", "config.R"))
+source(file.path(ANALYSIS_DIR, "lib", "logging.R"))
+
+output_dirs <- ensure_output_dirs("summary/expression_filter")
+figure_dir <- output_dirs["figures"]
+report_dir <- output_dirs["reports"]
+run_summary <- start_run_summary(
+  script = "analysis/summary/expression_filter_summary.R",
+  inputs = c(
+    file.path(out_dir, "filtering_summary_sn.csv"),
+    file.path(out_dir, "filtered_sample_summary.csv"),
+    file.path(out_dir, "expression_filter_reason_overall.csv"),
+    file.path(out_dir, "snSeq_merged.rds")
+  ),
+  outputs = c(file.path(figure_dir, "*.png"), file.path(report_dir, "summary_overview.pdf")),
+  parameters = list(stage = "step4_expression_filter_summary")
+)
 
 required_files <- c(
   file.path(out_dir, "filtering_summary_sn.csv"),
@@ -237,8 +287,8 @@ tech_pie <- ggplot(tech_pie_data, aes(x = 1, y = fraction, fill = technology)) +
   )
 
 pair1_combo <- (bar_plot + tech_pie) + plot_layout(ncol = 2, widths = c(1.6, 1))
-ggsave(file.path(analysis_dir, "pair1_filter_overview.png"), bar_plot, width = 8, height = 4, dpi = 300)
-ggsave(file.path(analysis_dir, "pair1_combo.png"), pair1_combo, width = 12, height = 6, dpi = 300)
+ggsave(file.path(figure_dir, "pair1_filter_overview.png"), bar_plot, width = 8, height = 4, dpi = 300)
+ggsave(file.path(figure_dir, "pair1_combo.png"), pair1_combo, width = 12, height = 6, dpi = 300)
 
 reason_order <- c(
   "keep",
@@ -297,7 +347,7 @@ reason_plot <- ggplot(reason_df, aes(x = filter_reason, y = n_cells, fill = filt
     axis.text.x = element_text(angle = 30, hjust = 1)
   )
 
-ggsave(file.path(analysis_dir, "filter_reason_breakdown.png"), reason_plot, width = 9, height = 5, dpi = 300)
+ggsave(file.path(figure_dir, "filter_reason_breakdown.png"), reason_plot, width = 9, height = 5, dpi = 300)
 
 ####################
 # Pair-1 by batch (scRef per-study style, adapted to reference_batch)
@@ -381,7 +431,7 @@ pair1_by_batch <- ggplot(batch_long, aes(x = step_f, y = cell_count, fill = step
     size = 2.7
   )
 
-ggsave(file.path(analysis_dir, "pair1_by_batch.png"), pair1_by_batch, width = 16, height = 5, dpi = 300)
+ggsave(file.path(figure_dir, "pair1_by_batch.png"), pair1_by_batch, width = 16, height = 5, dpi = 300)
 
 celltype_df <- as.data.frame(table(merged_obj$celltype_update), stringsAsFactors = FALSE) %>%
   rename(celltype_update = Var1, n = Freq) %>%
@@ -479,7 +529,7 @@ celltype_pie <- ggplot(ct_pie_data, aes(x = 1, y = fraction, fill = celltype_upd
   )
 
 pair2_combo <- (celltype_bar + celltype_pie) + plot_layout(ncol = 2, widths = c(1.7, 1.1))
-ggsave(file.path(analysis_dir, "pair2_celltype_composition.png"), pair2_combo, width = 13, height = 6, dpi = 300)
+ggsave(file.path(figure_dir, "pair2_celltype_composition.png"), pair2_combo, width = 13, height = 6, dpi = 300)
 
 ####################
 # Pair-3 UMAPs (publication-style final celltype + technology)
@@ -554,7 +604,7 @@ umap_technology <- ggplot(umap_df, aes(x = UMAP_1, y = UMAP_2, color = technolog
   )
 
 pair3_umap <- (umap_celltype + umap_technology) + plot_layout(ncol = 2, widths = c(1.1, 1))
-ggsave(file.path(analysis_dir, "pair3_umap_celltype_technology.png"), pair3_umap, width = 13, height = 6, dpi = 300)
+ggsave(file.path(figure_dir, "pair3_umap_celltype_technology.png"), pair3_umap, width = 13, height = 6, dpi = 300)
 
 counts <- summary_df %>%
   transmute(
@@ -623,7 +673,7 @@ sample_plot <- ggplot(
     panel.grid.major.y = element_line(color = "gray90", linetype = "dashed")
   )
 
-ggsave(file.path(analysis_dir, "sample_retention.png"), sample_plot, width = 16, height = 7, dpi = 300)
+ggsave(file.path(figure_dir, "sample_retention.png"), sample_plot, width = 16, height = 7, dpi = 300)
 
 retention_df <- summary_df %>%
   transmute(
@@ -658,9 +708,9 @@ retention_plot <- ggplot(retention_df, aes(x = orig.ident, y = pct_retained, fil
     legend.position = "top"
   )
 
-ggsave(file.path(analysis_dir, "sample_retention_pct.png"), retention_plot, width = 16, height = 6, dpi = 300)
+ggsave(file.path(figure_dir, "sample_retention_pct.png"), retention_plot, width = 16, height = 6, dpi = 300)
 
-pdf(file.path(analysis_dir, "summary_overview.pdf"), width = 13, height = 8)
+pdf(file.path(report_dir, "summary_overview.pdf"), width = 13, height = 8)
 print(pair1_combo)
 print(pair1_by_batch)
 print(reason_plot)
@@ -669,3 +719,9 @@ print(pair3_umap)
 print(sample_plot)
 print(retention_plot)
 dev.off()
+
+run_summary <- finish_run_summary(run_summary, status = "ok")
+write_run_summary(
+  run_summary,
+  file.path(output_dirs["logs"], "expression_filter_summary.log")
+)

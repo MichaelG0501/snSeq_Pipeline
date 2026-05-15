@@ -1,3 +1,43 @@
+####################
+# Analysis registry:
+#   Status: active terminal figure-generation
+#   Script: analysis/infercna/plot_malignancy_summary.R
+#   Methodology: analysis/methodology/infercna/plot_malignancy_summary_methodology.md
+#   Map: analysis/ANALYSIS_MAP.md
+#   Output tiers: sn_outs/infercna/malignancy_summary/{intermediate,tables,figures,logs,reports}
+####################
+
+####################
+# plot_malignancy_summary.R
+#
+# Compile and plot post-step-6 malignancy composition across samples and
+# reference batches. This is a terminal reporting script and is not an input to
+# downstream state assignment.
+#
+# Input:
+#   sn_outs/sample_manifest.csv
+#   sn_outs/filtered_sample_summary.csv
+#   sn_outs/infercna_status_by_sample.csv
+#   sn_outs/by_samples/<sample>/malignancy_status.txt
+#   sn_outs/by_samples/<sample>/<sample>_malignancy_summary.csv
+#   sn_outs/by_samples/<sample>/<sample>_malignancy_cluster_summary.csv
+#
+# Output:
+#   sn_outs/malignancy_status_by_sample.csv
+#   sn_outs/malignancy_sample_summary.csv
+#   sn_outs/malignancy_cluster_summary.csv
+#   sn_outs/malignancy_classification_overall.csv
+#   sn_outs/malignancy_overall_summary.csv
+#   sn_outs/malignancy_by_sample.csv
+#   sn_outs/malignancy_simple_by_sample.csv
+#   sn_outs/infercna/malignancy_summary/figures/*.png
+#   sn_outs/infercna/malignancy_summary/reports/cancer_summary_overview.pdf
+#   sn_outs/infercna/malignancy_summary/logs/plot_malignancy_summary.log
+#
+# Usage:
+#   Rscript analysis/infercna/plot_malignancy_summary.R
+####################
+
 suppressPackageStartupMessages({
   library("dplyr")
   library("tidyr")
@@ -7,19 +47,27 @@ suppressPackageStartupMessages({
   library("Seurat")
 })
 
-args <- commandArgs(trailingOnly = FALSE)
-file_arg <- grep("^--file=", args, value = TRUE)
-script_path <- if (length(file_arg) > 0) {
-  normalizePath(sub("^--file=", "", file_arg[1]))
-} else {
-  normalizePath(getwd())
-}
+source("/rds/general/ephemeral/project/tumourheterogeneity1/ephemeral/snSeq_Pipeline/analysis/lib/config.R")
+source(file.path(ANALYSIS_DIR, "lib", "io_helpers.R"))
+source(file.path(ANALYSIS_DIR, "lib", "logging.R"))
 
-analysis_dir <- dirname(script_path)
-project_dir <- normalizePath(file.path(analysis_dir, "..", ".."))
-out_dir <- file.path(project_dir, "sn_outs")
+project_dir <- PROJECT_DIR
+out_dir <- SN_OUTS_DIR
+output_dirs <- ensure_output_dirs("infercna/malignancy_summary")
 
-dir.create(analysis_dir, recursive = TRUE, showWarnings = FALSE)
+run_summary <- start_run_summary(
+  script = "analysis/infercna/plot_malignancy_summary.R",
+  inputs = c(
+    file.path(out_dir, "sample_manifest.csv"),
+    file.path(out_dir, "filtered_sample_summary.csv"),
+    file.path(out_dir, "infercna_status_by_sample.csv")
+  ),
+  outputs = c(
+    file.path(out_dir, "malignancy_status_by_sample.csv"),
+    file.path(output_dirs["reports"], "cancer_summary_overview.pdf")
+  ),
+  parameters = list(stage = "post_step6_reporting")
+)
 
 manifest_path <- file.path(out_dir, "sample_manifest.csv")
 filtered_summary_path <- file.path(out_dir, "filtered_sample_summary.csv")
@@ -34,20 +82,6 @@ if (length(missing_files) > 0) {
 manifest <- read.csv(manifest_path, stringsAsFactors = FALSE)
 filtered_summary <- read.csv(filtered_summary_path, stringsAsFactors = FALSE)
 infercna_status <- read.csv(infercna_status_path, stringsAsFactors = FALSE)
-
-read_status <- function(path) {
-  if (!file.exists(path)) {
-    return(NA_character_)
-  }
-  trimws(readLines(path, warn = FALSE, n = 1))
-}
-
-read_optional_csv <- function(path) {
-  if (!file.exists(path)) {
-    return(NULL)
-  }
-  read.csv(path, stringsAsFactors = FALSE)
-}
 
 tech_colors <- c(
   "snSeq" = "steelblue",
@@ -332,11 +366,17 @@ batch_plot <- ggplot(batch_level, aes(x = reference_batch, y = pct, fill = malig
     legend.position = "right"
   )
 
-ggsave(file.path(analysis_dir, "malignancy_overall_counts.png"), overall_plot, width = 9, height = 5.5, dpi = 300)
-ggsave(file.path(analysis_dir, "malignant_fraction_by_sample.png"), malignant_fraction_plot, width = 12, height = 4.8, dpi = 300)
-ggsave(file.path(analysis_dir, "malignancy_composition_by_sample.png"), composition_plot, width = 13, height = 5.4, dpi = 300)
-ggsave(file.path(analysis_dir, "malignancy_composition_by_reference_batch.png"), batch_plot, width = 9, height = 5.5, dpi = 300)
+ggsave(file.path(output_dirs["figures"], "malignancy_overall_counts.png"), overall_plot, width = 9, height = 5.5, dpi = 300)
+ggsave(file.path(output_dirs["figures"], "malignant_fraction_by_sample.png"), malignant_fraction_plot, width = 12, height = 4.8, dpi = 300)
+ggsave(file.path(output_dirs["figures"], "malignancy_composition_by_sample.png"), composition_plot, width = 13, height = 5.4, dpi = 300)
+ggsave(file.path(output_dirs["figures"], "malignancy_composition_by_reference_batch.png"), batch_plot, width = 9, height = 5.5, dpi = 300)
 
 overview <- (overall_plot + batch_plot) / (malignant_fraction_plot + composition_plot) +
   plot_layout(heights = c(1, 1.15))
-ggsave(file.path(analysis_dir, "cancer_summary_overview.pdf"), overview, width = 14, height = 10.5)
+ggsave(file.path(output_dirs["reports"], "cancer_summary_overview.pdf"), overview, width = 14, height = 10.5)
+
+run_summary <- finish_run_summary(run_summary, status = "ok")
+write_run_summary(
+  run_summary,
+  file.path(output_dirs["logs"], "plot_malignancy_summary.log")
+)

@@ -1,8 +1,35 @@
 ####################
-# Auto_states_unresolved_pan_cancer_noreg.R
-# Unresolved-cell pan-cancer subclassification for snRNA-seq (noreg mode).
-# Assignment based on top raw UCell 3CA score (for barplot).
-# Unsupervised clustering for heatmap.
+# Analysis registry:
+#   Status: legacy comparison only; no downstream script may depend on outputs.
+#   Script: analysis/legacy/cell_states/legacy_prefix_unresolved_pan_cancer_noreg_comparison.R
+#   Methodology: analysis/methodology/legacy/cell_states/legacy_prefix_unresolved_pan_cancer_noreg_comparison_methodology.md
+#   Map: analysis/ANALYSIS_MAP.md
+#   Output tiers: sn_outs/legacy/unresolved_pan_cancer_noreg/{intermediate,tables,figures,logs,reports}
+####################
+
+####################
+# legacy_prefix_unresolved_pan_cancer_noreg_comparison.R
+#
+# LEGACY: comparison-only unresolved pan-cancer subclassification. This script
+# plots the older all-pan-cancer-3CA unresolved-cell method. It is superseded by
+# analysis/cell_states/relabel_unresolved_retained_3ca.R, which uses only the
+# fixed scRef-retained 3CA metaprograms and writes Auto_final_states.rds.
+#
+# Input:
+#   sn_outs/snSeq_malignant_epi.rds
+#   sn_outs/Auto_topmp_v2_noreg_states_B.rds
+#   sn_outs/UCell_3CA_MPs.rds
+#   sn_outs/snSeq_malignant_epi_cc_score.rds
+#
+# Output:
+#   sn_outs/legacy/unresolved_pan_cancer_noreg/figures/unresolved_pan_cancer_barplot.pdf
+#   sn_outs/legacy/unresolved_pan_cancer_noreg/figures/unresolved_pan_cancer_heatmap.pdf
+#   sn_outs/legacy/unresolved_pan_cancer_noreg/tables/unresolved_pan_cancer_summary.csv
+#   sn_outs/legacy/unresolved_pan_cancer_noreg/intermediate/unresolved_pan_cancer_results.rds
+#   sn_outs/legacy/unresolved_pan_cancer_noreg/logs/legacy_prefix_unresolved_pan_cancer_noreg_comparison.log
+#
+# Usage:
+#   Rscript analysis/legacy/cell_states/legacy_prefix_unresolved_pan_cancer_noreg_comparison.R
 ####################
 
 library(Seurat)
@@ -13,7 +40,31 @@ library(dplyr)
 library(tidyr)
 library(scales)
 
-setwd("/rds/general/ephemeral/project/tumourheterogeneity1/ephemeral/snSeq_Pipeline/sn_outs")
+source("/rds/general/ephemeral/project/tumourheterogeneity1/ephemeral/snSeq_Pipeline/analysis/lib/config.R")
+source(file.path(ANALYSIS_DIR, "lib", "state_helpers.R"))
+source(file.path(ANALYSIS_DIR, "lib", "logging.R"))
+
+setwd(SN_OUTS_DIR)
+output_dirs <- ensure_output_dirs("legacy/unresolved_pan_cancer_noreg")
+run_summary <- start_run_summary(
+  script = "analysis/legacy/cell_states/legacy_prefix_unresolved_pan_cancer_noreg_comparison.R",
+  inputs = c(
+    file.path(SN_OUTS_DIR, "snSeq_malignant_epi.rds"),
+    file.path(SN_OUTS_DIR, "Auto_topmp_v2_noreg_states_B.rds"),
+    file.path(SN_OUTS_DIR, "UCell_3CA_MPs.rds"),
+    file.path(SN_OUTS_DIR, "snSeq_malignant_epi_cc_score.rds")
+  ),
+  outputs = c(
+    file.path(output_dirs["figures"], "unresolved_pan_cancer_barplot.pdf"),
+    file.path(output_dirs["figures"], "unresolved_pan_cancer_heatmap.pdf"),
+    file.path(output_dirs["tables"], "unresolved_pan_cancer_summary.csv"),
+    file.path(output_dirs["intermediate"], "unresolved_pan_cancer_results.rds")
+  ),
+  parameters = list(
+    status = "legacy",
+    superseded_by = "analysis/cell_states/relabel_unresolved_retained_3ca.R"
+  )
+)
 
 # 1. Load data
 message("Loading data...")
@@ -32,14 +83,7 @@ ucell_3ca <- ucell_3ca[common_cells, , drop = FALSE]
 state_noreg <- state_noreg[common_cells]
 cc_score <- cc_score[common_cells]
 
-CC_FIXED <- c(
-  "X3CA_mp_1.Cell.Cycle...G2.M",
-  "X3CA_mp_2.Cell.Cycle...G1.S",
-  "X3CA_mp_3.Cell.Cylce.HMG.rich",
-  "X3CA_mp_4.Chromatin",
-  "X3CA_mp_5.Cell.cycle.single.nucleus"
-)
-pan_cancer_mps <- setdiff(colnames(ucell_3ca), CC_FIXED)
+pan_cancer_mps <- setdiff(colnames(ucell_3ca), THREE_CA_CELL_CYCLE_MPS)
 
 # 3. Logic for Unresolved cells
 unresolved_cells <- names(state_noreg)[state_noreg == "Unresolved"]
@@ -53,19 +97,13 @@ sub_scores_raw <- ucell_3ca[unresolved_cells, pan_cancer_mps, drop = FALSE]
 top_mp_assigned <- pan_cancer_mps[max.col(sub_scores_raw, ties.method = "first")]
 names(top_mp_assigned) <- unresolved_cells
 
-# Clean names for plotting
-clean_mp_name <- function(x) {
-  x <- gsub("^X3CA_", "3CA_", x)
-  gsub("\\.", " ", x)
-}
-
 # 4. Bar plot: Top MP assignment counts (No stacking)
 plot_df <- data.frame(
   cell = unresolved_cells,
   top_mp = top_mp_assigned,
   stringsAsFactors = FALSE
 ) %>%
-  mutate(top_mp_clean = clean_mp_name(top_mp))
+  mutate(top_mp_clean = clean_3ca_name(top_mp))
 
 # Order MPs by total abundance
 mp_order <- plot_df %>%
@@ -86,36 +124,9 @@ p_bar <- ggplot(plot_df, aes(x = top_mp_clean)) +
         plot.title = element_text(face = "bold", hjust = 0.5),
         plot.subtitle = element_text(hjust = 0.5))
 
-ggsave("Auto_topmp_v2_noreg_unresolved_pan_cancer_barplot.pdf", p_bar, width = 12, height = 8)
+ggsave(file.path(output_dirs["figures"], "unresolved_pan_cancer_barplot.pdf"), p_bar, width = 12, height = 8)
 
 # 5. Unsupervised subclassification for Heatmap
-z_normalise <- function(mat, sample_var, study_var) {
-  clust_df <- as.data.frame(mat)
-  clust_df$.cell <- rownames(mat)
-  clust_df$.sample <- sample_var[rownames(mat)]
-  clust_df$.study <- study_var[rownames(mat)]
-
-  study_sd <- clust_df %>%
-    group_by(.study) %>%
-    summarise(across(all_of(colnames(mat)), ~ sd(.x, na.rm = TRUE)), .groups = "drop") %>%
-    tibble::column_to_rownames(".study") %>%
-    as.matrix()
-  study_sd[is.na(study_sd) | study_sd == 0] <- 1
-
-  clust_centered <- clust_df %>%
-    group_by(.sample) %>%
-    mutate(across(all_of(colnames(mat)), ~ .x - mean(.x, na.rm = TRUE))) %>%
-    ungroup()
-
-  mp_adj <- as.matrix(clust_centered[, colnames(mat), drop = FALSE])
-  rownames(mp_adj) <- clust_centered$.cell
-  for (mp in colnames(mp_adj)) {
-    mp_adj[, mp] <- mp_adj[, mp] / study_sd[clust_centered$.study, mp]
-  }
-  mp_adj[!is.finite(mp_adj)] <- 0
-  mp_adj
-}
-
 mp_adj <- z_normalise(as.matrix(sub_scores_raw), 
                       tmdata_all$orig.ident[unresolved_cells], 
                       tmdata_all$reference_batch[unresolved_cells])
@@ -138,7 +149,7 @@ max_cells_heatmap <- 6000
 cells_to_plot <- if(length(unresolved_cells) > max_cells_heatmap) sample(unresolved_cells, max_cells_heatmap) else unresolved_cells
 
 sub_scores_plot <- t(mp_adj[cells_to_plot, , drop = FALSE])
-rownames(sub_scores_plot) <- clean_mp_name(rownames(sub_scores_plot))
+rownames(sub_scores_plot) <- clean_3ca_name(rownames(sub_scores_plot))
 split_vec <- factor(subclass[cells_to_plot])
 
 study_vals <- tmdata_all$reference_batch[cells_to_plot]
@@ -182,12 +193,25 @@ ht <- Heatmap(
   column_title = "Unresolved Pan-Cancer Subclassification (Unsupervised Clustering)"
 )
 
-pdf("Auto_topmp_v2_noreg_unresolved_pan_cancer_heatmap.pdf", width = 18, height = 10, useDingbats = FALSE)
+pdf(file.path(output_dirs["figures"], "unresolved_pan_cancer_heatmap.pdf"), width = 18, height = 10, useDingbats = FALSE)
 draw(ht, merge_legend = TRUE)
 dev.off()
 
 # Save summary
-write.csv(plot_df %>% count(top_mp_clean, name = "cells"), "Auto_topmp_v2_noreg_unresolved_pan_cancer_summary.csv", row.names = FALSE)
-saveRDS(data.frame(cell = unresolved_cells, subclass = subclass, top_mp = top_mp_assigned), "Auto_topmp_v2_noreg_unresolved_pan_cancer_results.rds")
+write.csv(
+  plot_df %>% count(top_mp_clean, name = "cells"),
+  file.path(output_dirs["tables"], "unresolved_pan_cancer_summary.csv"),
+  row.names = FALSE
+)
+saveRDS(
+  data.frame(cell = unresolved_cells, subclass = subclass, top_mp = top_mp_assigned),
+  file.path(output_dirs["intermediate"], "unresolved_pan_cancer_results.rds")
+)
 
-message("Finished. Outputs saved to sn_outs/")
+run_summary <- finish_run_summary(run_summary, status = "legacy_ok")
+write_run_summary(
+  run_summary,
+  file.path(output_dirs["logs"], "legacy_prefix_unresolved_pan_cancer_noreg_comparison.log")
+)
+
+message("Finished. Legacy comparison outputs saved under sn_outs/legacy/unresolved_pan_cancer_noreg/")

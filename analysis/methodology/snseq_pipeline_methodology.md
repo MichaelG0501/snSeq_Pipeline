@@ -871,7 +871,7 @@ If fewer than two of these lineages are available, that batch is skipped for ref
 
 Step 4 now also runs:
 
-- `analysis/summary/summary.R`
+- `analysis/summary/expression_filter_summary.R`
 
 This produces review plots for step-4 acceptance, including:
 
@@ -884,15 +884,15 @@ This produces review plots for step-4 acceptance, including:
 
 These plots are saved under:
 
-- `analysis/summary/`
-- including `analysis/summary/pair3_umap_celltype_technology.png`
+- `sn_outs/summary/expression_filter/figures/`
+- including `sn_outs/summary/expression_filter/figures/pair3_umap_celltype_technology.png`
+- combined report: `sn_outs/summary/expression_filter/reports/summary_overview.pdf`
 
 ## 6. Cohort QC Heatmaps
 
 The workspace also provides a scRef-style QC heatmap helper generated from:
 
-- `analysis/plotting/qc_heatmap.R`
-- `Auto_qc_heatmap.sh`
+- `analysis/qc/qc_heatmap.R`
 
 This helper ports the original `scRef_Pipeline/analysis/plotting/qc_heatmap.R` layout and legends to the snRNA-seq workspace, while keeping the snRNA-seq QC thresholds:
 
@@ -918,8 +918,7 @@ Two stage-level heatmaps are written:
 
 The workspace also provides a dedicated annotation review PDF generated from:
 
-- `analysis/annotation/annotation_featureplots.R`
-- `Auto_annotation_featureplots.sh`
+- `analysis/annotation/plot_annotation_featureplots.R`
 
 This plot set is built directly from the current annotated per-sample objects `sn_outs/by_samples/<sample>/<sample>_anno.rds`.
 
@@ -942,10 +941,10 @@ The sample selection logic is controlled by variables at the top of the R script
 - `n_samples`: Number of samples to pick if mode is `"subset"`.
 - `sample_seed`: Seed for subset reproducibility.
 
-To change which samples are plotted, edit these values in `analysis/annotation/annotation_featureplots.R` and then run:
+To change which samples are plotted, pass key/value arguments to `analysis/annotation/plot_annotation_featureplots.R` and then run:
 
 ```bash
-qsub Auto_annotation_featureplots.sh
+Rscript analysis/annotation/plot_annotation_featureplots.R sample_mode=subset n_samples=10 sample_seed=1
 ```
 
 For each sample, four pages are produced, followed by a blank separator page before the next sample:
@@ -1038,7 +1037,7 @@ Step 4 does not simply check canonical markers. It now uses the OAC/snRNA-derive
 
 The workspace now includes:
 
-- `analysis/cell_states/Auto_verify_malignancy_results.R`
+- `analysis/infercna/verify_malignancy_integrity.R`
 
 This is a post-step-6 audit. It does not modify any malignancy objects. It verifies that the current malignancy outputs are internally consistent before any merged malignant-epithelial downstream analysis is run.
 
@@ -1083,11 +1082,11 @@ The verification step writes:
 - `sn_outs/Auto_malignancy_integrity_by_sample.csv`
 - `sn_outs/Auto_malignancy_integrity_summary.csv`
 
-## 10. Malignant Epithelial Merge and UCell Scoring (`geneNMF.R`)
+## 10. Malignant Epithelial Merge and UCell Scoring (`prepare_malignant_epithelial_ucell.R`)
 
 The workspace now includes:
 
-- `geneNMF.R`
+- `analysis/cell_states/prepare_malignant_epithelial_ucell.R`
 - `8_geneNMF.sh`
 
 This stage creates the merged malignant epithelial snRNA-seq object and scores both the scRef metaprograms and the external 3CA metaprograms on that merged object.
@@ -1193,12 +1192,12 @@ The stage also writes:
 
 The downstream state scripts are:
 
-- `analysis/cell_states/states_topmpB_reg_noreg.R`
-- `analysis/cell_states/states_unresolved_relabel.R`
-- `analysis/cell_states/overall_state_proportions.R`
-- `analysis/cell_states/sample_abundance.R`
-- `analysis/cell_states/states_hybrid_pairwise_nodeplot.R`
-- `Auto_cell_states.sh`
+- `analysis/cell_states/assign_states_approach_b_noreg.R`
+- `analysis/cell_states/relabel_unresolved_retained_3ca.R`
+- `analysis/cell_states/plot_state_overall_proportions.R`
+- `analysis/cell_states/plot_state_sample_abundance.R`
+- `analysis/cell_states/plot_state_hybrid_pairwise.R`
+- `cell_states_master.sh`
 
 For the snRNA-seq workspace, only the `noreg` branch is implemented. The `reg` branch from the scRef workspace is intentionally ignored.
 
@@ -1216,7 +1215,7 @@ This field is used for:
 
 `technology` is not used as the normalization or grouping variable for state mapping.
 
-### 11.2 Primary state assignment (`states_topmpB_reg_noreg.R`)
+### 11.2 Primary state assignment (`assign_states_approach_b_noreg.R`)
 
 The script reads:
 
@@ -1244,7 +1243,7 @@ The cell-cycle score used in the boxplots and heatmap annotations is not recompu
 
 - `sn_outs/snSeq_malignant_epi_cc_score.rds`
 
-This score was precomputed in `geneNMF.R` from the merged malignant epithelial `data.*` layers using the consensus cell-cycle panel.
+This score is precomputed in `analysis/cell_states/prepare_malignant_epithelial_ucell.R` from the merged malignant epithelial `data.*` layers using the consensus cell-cycle panel.
 
 Non-cell-cycle UCell scores are normalized by:
 
@@ -1268,7 +1267,7 @@ The outputs are:
 - `sn_outs/Auto_topmp_v2_noreg_heatmap_B_cconly.pdf`
 - `sn_outs/Auto_topmp_v2_noreg_summary.csv`
 
-### 11.3 Unresolved relabelling with retained 3CA metaprograms (`states_unresolved_relabel.R`)
+### 11.3 Unresolved relabelling with retained 3CA metaprograms (`relabel_unresolved_retained_3ca.R`)
 
 Only cells initially labelled:
 
@@ -1301,7 +1300,7 @@ Additional outputs are:
 
 ## 12. Downstream State Visualisation and Sample-Level Analysis
 
-### 12.1 Overall state proportions (`overall_state_proportions.R`)
+### 12.1 Overall state proportions (`plot_state_overall_proportions.R`)
 
 This script reads `Auto_final_states.rds` when present, otherwise it falls back to `Auto_topmp_v2_noreg_states_B.rds`.
 
@@ -1309,7 +1308,7 @@ It writes:
 
 - `sn_outs/Auto_overall_state_proportions.pdf`
 
-### 12.2 Sample abundance plots (`sample_abundance.R`)
+### 12.2 Sample abundance plots (`plot_state_sample_abundance.R`)
 
 This script uses:
 
@@ -1335,7 +1334,7 @@ Outputs:
 - `sn_outs/task3_sample_abundance/Auto_task3_sample_abundance.pdf`
 - `sn_outs/task3_sample_abundance/Auto_sample_abundance_summary.csv`
 
-### 12.3 Hybrid pairwise plots (`states_hybrid_pairwise_nodeplot.R`)
+### 12.3 Hybrid pairwise plots (`plot_state_hybrid_pairwise.R`)
 
 This script uses the `noreg` state labels and adjusted state-group scores to summarize pairwise hybrid relationships among the five resolved scRef-derived states.
 

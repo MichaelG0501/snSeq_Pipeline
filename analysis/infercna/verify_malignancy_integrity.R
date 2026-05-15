@@ -1,25 +1,61 @@
-project_dir <- "/rds/general/ephemeral/project/tumourheterogeneity1/ephemeral/snSeq_Pipeline"
-out_dir <- file.path(project_dir, "sn_outs")
+####################
+# Analysis registry:
+#   Status: active audit
+#   Script: analysis/infercna/verify_malignancy_integrity.R
+#   Methodology: analysis/methodology/infercna/verify_malignancy_integrity_methodology.md
+#   Map: analysis/ANALYSIS_MAP.md
+#   Output tiers: sn_outs/infercna/malignancy_integrity/{intermediate,tables,figures,logs,reports}
+####################
+
+####################
+# verify_malignancy_integrity.R
+#
+# Audit completed step-6 malignancy outputs before malignant epithelial merge.
+# This script does not modify Seurat objects.
+#
+# Input:
+#   sn_outs/sample_manifest.csv
+#   sn_outs/by_samples/<sample>/expr_filter_status.txt
+#   sn_outs/by_samples/<sample>/infercna_status.txt
+#   sn_outs/by_samples/<sample>/malignancy_status.txt
+#   sn_outs/by_samples/<sample>/<sample>_epi_f.rds
+#   sn_outs/by_samples/<sample>/<sample>_malignancy_summary.csv
+#   sn_outs/by_samples/<sample>/<sample>_malignancy_cluster_summary.csv
+#
+# Output:
+#   sn_outs/Auto_malignancy_integrity_by_sample.csv
+#   sn_outs/Auto_malignancy_integrity_summary.csv
+#   sn_outs/infercna/malignancy_integrity/logs/verify_malignancy_integrity.log
+#
+# Usage:
+#   Rscript analysis/infercna/verify_malignancy_integrity.R
+####################
+
+source("/rds/general/ephemeral/project/tumourheterogeneity1/ephemeral/snSeq_Pipeline/analysis/lib/config.R")
+source(file.path(ANALYSIS_DIR, "lib", "io_helpers.R"))
+source(file.path(ANALYSIS_DIR, "lib", "logging.R"))
+
+project_dir <- PROJECT_DIR
+out_dir <- SN_OUTS_DIR
 setwd(project_dir)
+output_dirs <- ensure_output_dirs("infercna/malignancy_integrity")
+
+run_summary <- start_run_summary(
+  script = "analysis/infercna/verify_malignancy_integrity.R",
+  inputs = c(file.path(out_dir, "sample_manifest.csv")),
+  outputs = c(
+    file.path(out_dir, "Auto_malignancy_integrity_by_sample.csv"),
+    file.path(out_dir, "Auto_malignancy_integrity_summary.csv")
+  ),
+  parameters = list(stage = "post_step6_audit")
+)
 
 manifest_path <- file.path(out_dir, "sample_manifest.csv")
 if (!file.exists(manifest_path)) {
   stop("Missing sample manifest: ", manifest_path)
 }
 
-read_status <- function(path) {
-  if (!file.exists(path)) {
-    return(NA_character_)
-  }
-  trimws(readLines(path, warn = FALSE, n = 1))
-}
-
-safe_read_csv <- function(path) {
-  if (!file.exists(path)) {
-    return(NULL)
-  }
-  read.csv(path, stringsAsFactors = FALSE)
-}
+safe_read_csv <- read_optional_csv
 
 value_or_zero <- function(x, name) {
   if (!name %in% names(x)) {
@@ -184,6 +220,20 @@ write.csv(
   quote = TRUE
 )
 
+write.csv(
+  integrity_rows,
+  file.path(output_dirs["tables"], "malignancy_integrity_by_sample.csv"),
+  row.names = FALSE,
+  quote = TRUE
+)
+
+write.csv(
+  summary_row,
+  file.path(output_dirs["tables"], "malignancy_integrity_summary.csv"),
+  row.names = FALSE,
+  quote = TRUE
+)
+
 if (any(!integrity_rows$passed)) {
   bad_samples <- integrity_rows$sample[!integrity_rows$passed]
   stop(
@@ -197,4 +247,10 @@ message(
   nrow(integrity_rows),
   " samples; malignant cells available for downstream merge: ",
   sum(integrity_rows$malignant_total_cells, na.rm = TRUE)
+)
+
+run_summary <- finish_run_summary(run_summary, status = "ok")
+write_run_summary(
+  run_summary,
+  file.path(output_dirs["logs"], "verify_malignancy_integrity.log")
 )

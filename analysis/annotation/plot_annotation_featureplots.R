@@ -1,3 +1,38 @@
+####################
+# Analysis registry:
+#   Status: active terminal figure-generation
+#   Script: analysis/annotation/plot_annotation_featureplots.R
+#   Methodology: analysis/methodology/annotation/plot_annotation_featureplots_methodology.md
+#   Map: analysis/ANALYSIS_MAP.md
+#   Output tiers: sn_outs/annotation/featureplots/{intermediate,tables,figures,logs,reports}
+####################
+
+####################
+# plot_annotation_featureplots.R
+#
+# Render annotation review feature plots reflecting the current implemented
+# scoring logic from Clustering.R, Annotation.R, and the step-4 expression
+# filter marker panel.
+#
+# Input:
+#   sn_outs/sample_manifest.csv
+#   /rds/general/project/tumourheterogeneity1/live/EAC_Ref_all/Marker_Genes.xlsx
+#   sn_outs/annotation_score_markers.csv
+#   sn_outs/expression_filter_markers.csv
+#   sn_outs/by_samples/<sample>/<sample>_anno.rds
+#
+# Output:
+#   sn_outs/snseq_annotation_featureplots_<selection>.pdf
+#   sn_outs/annotation_featureplots_status_<selection>.csv
+#   sn_outs/selected_samples_<selection>.csv
+#   sn_outs/annotation/featureplots/{reports,tables,logs}/...
+#
+# Usage:
+#   Rscript analysis/annotation/plot_annotation_featureplots.R
+#   Rscript analysis/annotation/plot_annotation_featureplots.R sample_mode=all
+#   Rscript analysis/annotation/plot_annotation_featureplots.R sample_mode=subset n_samples=10 sample_seed=1
+####################
+
 suppressPackageStartupMessages({
   library("Seurat")
   library("dplyr")
@@ -9,6 +44,9 @@ suppressPackageStartupMessages({
   library("Matrix")
   library("grid")
 })
+
+source("/rds/general/ephemeral/project/tumourheterogeneity1/ephemeral/snSeq_Pipeline/analysis/lib/config.R")
+source(file.path(ANALYSIS_DIR, "lib", "logging.R"))
 
 set.seed(1)
 
@@ -32,19 +70,33 @@ if (length(missing_files) > 0) {
 
 sample_manifest <- read.csv(manifest_path, stringsAsFactors = FALSE)
 sample_ids <- unique(sample_manifest$sample)
+args_kv <- parse_key_value_args()
+output_dirs <- ensure_output_dirs("annotation/featureplots")
 
 ## ---- Parameters ----
 ## Available choices for sample_mode:
 ## 1. "all"    - Process all samples in the manifest.
 ## 2. "subset" - Process a random subset (defined by n_samples and sample_seed).
 ## 3. "<ID>"   - Enter a specific sample ID (e.g., "patient_A_pre") to plot only that sample.
-sample_mode   <- "E_post_T1_biopsy" 
+sample_mode <- arg_value(
+  args_kv,
+  "sample_mode",
+  Sys.getenv("SNSEQ_ANNOTATION_SAMPLE_MODE", unset = "subset")
+)
 
 ## If sample_mode is "subset", how many samples should be randomly picked?
-n_samples     <- 10       
+n_samples <- as.integer(arg_value(
+  args_kv,
+  "n_samples",
+  Sys.getenv("SNSEQ_ANNOTATION_N_SAMPLES", unset = "10")
+))
 
 ## Random seed for reproducibility when using "subset" mode.
-sample_seed   <- 1        
+sample_seed <- as.integer(arg_value(
+  args_kv,
+  "sample_seed",
+  Sys.getenv("SNSEQ_ANNOTATION_SAMPLE_SEED", unset = "1")
+))
 
 ## ---- Process Selection ----
 
@@ -67,6 +119,13 @@ if (sample_mode == "all") {
 pdf_path      <- file.path(out_dir, paste0("snseq_annotation_featureplots_", selection_label, ".pdf"))
 status_path   <- file.path(out_dir, paste0("annotation_featureplots_status_", selection_label, ".csv"))
 selected_path <- file.path(out_dir, paste0("selected_samples_", selection_label, ".csv"))
+
+run_summary <- start_run_summary(
+  script = "analysis/annotation/plot_annotation_featureplots.R",
+  inputs = required_files,
+  outputs = c(pdf_path, status_path, selected_path),
+  parameters = list(sample_mode = sample_mode, n_samples = n_samples, sample_seed = sample_seed)
+)
 
 ## ---- Cell type definitions ----
 
@@ -513,3 +572,12 @@ for (idx in seq_along(selected_samples)) {
 
 dev.off()
 write.csv(bind_rows(plot_status), status_path, row.names = FALSE)
+file.copy(pdf_path, file.path(output_dirs["reports"], basename(pdf_path)), overwrite = TRUE)
+file.copy(status_path, file.path(output_dirs["tables"], basename(status_path)), overwrite = TRUE)
+file.copy(selected_path, file.path(output_dirs["tables"], basename(selected_path)), overwrite = TRUE)
+
+run_summary <- finish_run_summary(run_summary, status = "ok")
+write_run_summary(
+  run_summary,
+  file.path(output_dirs["logs"], paste0("plot_annotation_featureplots_", selection_label, ".log"))
+)

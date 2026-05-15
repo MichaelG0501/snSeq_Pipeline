@@ -1,6 +1,29 @@
 ####################
-# Auto_overall_state_proportions.R
-# Overall proportion barplot for noreg Approach B cell states.
+# Analysis registry:
+#   Status: active terminal figure-generation
+#   Script: analysis/cell_states/plot_state_overall_proportions.R
+#   Methodology: analysis/methodology/cell_states/plot_state_overall_proportions_methodology.md
+#   Map: analysis/ANALYSIS_MAP.md
+#   Output tiers: sn_outs/cell_states/overall_proportions/{intermediate,tables,figures,logs,reports}
+####################
+
+####################
+# plot_state_overall_proportions.R
+#
+# Generate the overall malignant epithelial state composition barplot using
+# the selected Approach-B noreg final states.
+#
+# Input:
+#   sn_outs/snSeq_malignant_epi.rds
+#   sn_outs/Auto_final_states.rds or sn_outs/Auto_topmp_v2_noreg_states_B.rds
+#
+# Output:
+#   sn_outs/Auto_overall_state_proportions.pdf
+#   sn_outs/cell_states/overall_proportions/tables/overall_state_proportions.csv
+#   sn_outs/cell_states/overall_proportions/logs/plot_state_overall_proportions.log
+#
+# Usage:
+#   Rscript analysis/cell_states/plot_state_overall_proportions.R
 ####################
 
 library(Seurat)
@@ -9,38 +32,37 @@ library(dplyr)
 library(tidyr)
 library(scales)
 
-setwd("/rds/general/ephemeral/project/tumourheterogeneity1/ephemeral/snSeq_Pipeline/sn_outs")
+source("/rds/general/ephemeral/project/tumourheterogeneity1/ephemeral/snSeq_Pipeline/analysis/lib/config.R")
+source(file.path(ANALYSIS_DIR, "lib", "state_helpers.R"))
+source(file.path(ANALYSIS_DIR, "lib", "logging.R"))
+
+setwd(SN_OUTS_DIR)
+output_dirs <- ensure_output_dirs("cell_states/overall_proportions")
+
+run_summary <- start_run_summary(
+  script = "analysis/cell_states/plot_state_overall_proportions.R",
+  inputs = c(
+    file.path(SN_OUTS_DIR, "snSeq_malignant_epi.rds"),
+    PREFERRED_STATE_DEFINITION$final_state_file,
+    PREFERRED_STATE_DEFINITION$primary_state_file
+  ),
+  outputs = c(
+    file.path(SN_OUTS_DIR, "Auto_overall_state_proportions.pdf"),
+    file.path(output_dirs["tables"], "overall_state_proportions.csv")
+  ),
+  parameters = list(state_method = PREFERRED_STATE_DEFINITION$label)
+)
 
 message("Loading data ...")
 tmdata_all <- readRDS("snSeq_malignant_epi.rds")
-final_states_path <- "Auto_final_states.rds"
-if (file.exists(final_states_path)) {
-  state_B <- readRDS(final_states_path)
-} else {
-  state_B <- readRDS("Auto_topmp_v2_noreg_states_B.rds")
-}
+state_B <- read_preferred_states()
 
 common_cells <- intersect(names(state_B), Cells(tmdata_all))
 state_B <- state_B[common_cells]
 
-group_cols <- c(
-  "Classic Proliferative" = "#E41A1C",
-  "Basal to Intestinal Metaplasia" = "#4DAF4A",
-  "Stress-adaptive" = "#984EA3",
-  "SMG-like Metaplasia" = "#FF7F00",
-  "Immune Infiltrating" = "#377EB8",
-  "3CA_EMT_and_Protein_maturation" = "#666666",
-  "Unresolved" = "grey80",
-  "Hybrid" = "black"
-)
+group_cols <- STATE_COLORS
 
-base_order <- c(
-  "Classic Proliferative",
-  "Basal to Intestinal Metaplasia",
-  "Stress-adaptive",
-  "SMG-like Metaplasia",
-  "Immune Infiltrating"
-)
+base_order <- names(STATE_GROUPS)
 extra_states <- setdiff(unique(as.character(state_B)), c(base_order, "Unresolved", "Hybrid"))
 extra_states <- c("3CA_EMT_and_Protein_maturation", setdiff(extra_states, "3CA_EMT_and_Protein_maturation"))
 extra_states <- extra_states[extra_states %in% unique(as.character(state_B))]
@@ -93,5 +115,13 @@ p <- ggplot(overall, aes(x = "Overall", y = pct, fill = state)) +
 pdf("Auto_overall_state_proportions.pdf", width = 7, height = 9)
 print(p)
 dev.off()
+
+write.csv(overall, file.path(output_dirs["tables"], "overall_state_proportions.csv"), row.names = FALSE)
+
+run_summary <- finish_run_summary(run_summary, status = "ok")
+write_run_summary(
+  run_summary,
+  file.path(output_dirs["logs"], "plot_state_overall_proportions.log")
+)
 
 message("Finished. Plot saved to sn_outs/Auto_overall_state_proportions.pdf")
