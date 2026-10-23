@@ -2,6 +2,9 @@
 #PBS -l select=1:ncpus=8:mem=256gb
 #PBS -l walltime=08:00:00
 #PBS -N snseq_qc
+#PBS -koed
+#PBS -o /rds/general/project/tumourheterogeneity1/live/snSeq_Pipeline/
+#PBS -e /rds/general/project/tumourheterogeneity1/live/snSeq_Pipeline/
 set -euo pipefail
 
 echo "$(date +%T)"
@@ -11,7 +14,7 @@ module load tools/dev
 eval "$(~/miniforge3/bin/conda shell.bash hook)"
 source activate /rds/general/user/sg3723/home/anaconda3/envs/dmtcp
 
-WD=/rds/general/ephemeral/project/tumourheterogeneity1/ephemeral/snSeq_Pipeline
+WD=/rds/general/project/tumourheterogeneity1/live/snSeq_Pipeline
 
 cd "${WD}"
 mkdir -p sn_outs temp

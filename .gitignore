@@ -20,3 +20,11 @@
 *.synctex.gz
 *.fls
 *.fdb_latexmk
+
+/job_scripts/
+
+/Auto_session_checks/
+
+*.pbs-*.ER
+
+*.pbs-*.OU

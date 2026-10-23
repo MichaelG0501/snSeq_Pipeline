@@ -11,7 +11,7 @@ suppressPackageStartupMessages({
 
 set.seed(1)
 
-output_root <- "/rds/general/ephemeral/project/tumourheterogeneity1/ephemeral/snSeq_Pipeline/sn_outs"
+output_root <- "/rds/general/project/tumourheterogeneity1/live/snSeq_Pipeline/sn_outs"
 source_root <- "/rds/general/project/spatialtranscriptomics/live/ITH_all/all_samples"
 
 dir.create(output_root, recursive = TRUE, showWarnings = FALSE)

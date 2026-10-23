@@ -18,7 +18,7 @@
 PROJECT_DIR <- normalizePath(
   Sys.getenv(
     "SNSEQ_PIPELINE_DIR",
-    "/rds/general/ephemeral/project/tumourheterogeneity1/ephemeral/snSeq_Pipeline"
+    "/rds/general/project/tumourheterogeneity1/live/snSeq_Pipeline"
   ),
   mustWork = FALSE
 )
@@ -28,7 +28,7 @@ ANALYSIS_MAP_PATH <- file.path(ANALYSIS_DIR, "ANALYSIS_MAP.md")
 SCREF_OUTS_DIR <- normalizePath(
   Sys.getenv(
     "SCREF_OUTS_DIR",
-    "/rds/general/ephemeral/project/tumourheterogeneity1/ephemeral/scRef_Pipeline/ref_outs"
+    "/rds/general/project/tumourheterogeneity1/live/scRef_Pipeline/ref_outs"
   ),
   mustWork = FALSE
 )
@@ -36,9 +36,9 @@ SCREF_OUTS_DIR <- normalizePath(
 PREFERRED_STATE_DEFINITION <- list(
   approach = "B",
   regression_mode = "noreg",
-  label = "Approach B noreg",
-  final_state_file = file.path(SN_OUTS_DIR, "Auto_final_states.rds"),
-  primary_state_file = file.path(SN_OUTS_DIR, "Auto_topmp_v2_noreg_states_B.rds")
+  label = "Centred refined scRef projection, noreg",
+  final_state_file = file.path(SN_OUTS_DIR, "cell_states/centred/intermediate/centred_refined_noreg_states.rds"),
+  primary_state_file = file.path(SN_OUTS_DIR, "cell_states/centred/intermediate/centred_refined_noreg_states.rds")
 )
 
 OUTPUT_TIERS <- c("intermediate", "tables", "figures", "logs", "reports")
@@ -77,44 +77,45 @@ PLOT_DEFAULTS <- list(
   heatmap_legend_font = 11
 )
 
+####################
+# Current fixed centred scRef display definitions; source grouping is validated
+# and copied by the scoring producer before current assignment.
 MP_DESCRIPTIONS <- c(
-  "MP1"  = "G2M Cell Cycle",
-  "MP9"  = "G1S Cell Cycle",
-  "MP2"  = "MYC-related Proliferation",
-  "MP17" = "Basal-like Transition",
-  "MP14" = "Hypoxia Adapted Epi.",
-  "MP5"  = "Epithelial IFN Resp.",
-  "MP10" = "Columnar Diff.",
-  "MP8"  = "Intestinal Diff.",
-  "MP13" = "Hypoxic Inflam. Epi.",
-  "MP7"  = "DNA Damage Repair",
-  "MP18" = "Secretory Diff. (Intest.)",
-  "MP16" = "Secretory Diff. (Gastric)",
-  "MP15" = "Immune Infiltration",
-  "MP12" = "Neuro-responsive Epi"
+  "MP1" = "G2/M cell cycle",
+  "MP5" = "G1/S cell cycle",
+  "MP13+" = "Single-nucleus cell cycle",
+  "MP2+" = "MYC driven biosynthesis",
+  "MP14" = "Squamoid/basal transition",
+  "MP3+" = "Basal-columnar invasive epithelium",
+  "MP6+" = "Inflammatory-reactive columnar epithelium",
+  "MP11+" = "Epithelial type I interferon response",
+  "MP9+" = "Metabolic columnar epithelium",
+  "MP10+" = "Intestinal metaplasia",
+  "MP18b" = "Mucous-secretory differentiation",
+  "MP16" = "Mucous-secretory glandular epithelium",
+  "MP17" = "MHC-II glandular progenitor",
+  "MP8b" = "Metabolic intestinal metaplasia",
+  "MP8+" = "Glandular intestinal metaplasia",
+  "MP12" = "Hypoxic-inflammatory adaptive plasticity",
+  "MP15" = "Cancer-cell immune mimicry"
 )
 
-CC_MPS <- c("MP1", "MP7", "MP9")
-
+CC_MPS <- c("MP1", "MP5", "MP13+")
 STATE_GROUPS <- list(
-  "Classic Proliferative" = c("MP2"),
-  "Basal to Intestinal Metaplasia" = c("MP17", "MP14", "MP5", "MP10", "MP8"),
-  "Stress-adaptive" = c("MP13", "MP12"),
-  "SMG-like Metaplasia" = c("MP18", "MP16"),
-  "Immune Infiltrating" = c("MP15")
+  "Classic proliferation" = c("MP2+"),
+  "Squamous-to-intestinal" = c("MP14", "MP3+", "MP6+", "MP11+", "MP9+", "MP10+"),
+  "Glandular-to-intestinal" = c("MP18b", "MP16", "MP17", "MP8b", "MP8+"),
+  "Stress-adaptive" = c("MP12"),
+  "Cancer-cell immune mimicry" = c("MP15")
 )
-
 STATE_COLORS <- c(
-  "Classic Proliferative" = "#E41A1C",
-  "Basal to Intestinal Metaplasia" = "#4DAF4A",
-  "Stress-adaptive" = "#984EA3",
-  "SMG-like Metaplasia" = "#FF7F00",
-  "Immune Infiltrating" = "#377EB8",
-  "3CA_EMT_and_Protein_maturation" = "#666666",
-  "Unresolved" = "grey80",
-  "Hybrid" = "black"
+  "Classic proliferation" = "#E41A1C", "Squamous-to-intestinal" = "#4DAF4A",
+  "Glandular-to-intestinal" = "#FF7F00", "Stress-adaptive" = "#984EA3",
+  "Cancer-cell immune mimicry" = "#377EB8", "Unresolved" = "grey80", "Hybrid" = "black"
 )
+####################
 
+# Historical retained 3CA mappings are diagnostic/legacy provenance only.
 RETAINED_3CA_STATE_MAP <- c(
   "X3CA_mp_30.Respiration.1" = "Classic Proliferative",
   "X3CA_mp_12.Protein.maturation" = "3CA_EMT_and_Protein_maturation",
@@ -183,3 +184,18 @@ sn_out_path <- function(...) {
 analysis_path <- function(...) {
   file.path(ANALYSIS_DIR, ...)
 }
+
+####################
+# Current centred reference paths. Historical 3CA maps above are diagnostic
+# provenance only and do not modify current centred state labels.
+CENTRED_REFERENCE_DIR <- file.path(SCREF_OUTS_DIR, "Metaprogrammes_Results", "centred", "mp_refinement")
+CENTRED_OUTPUT_DIR <- file.path(SN_OUTS_DIR, "cell_states", "centred")
+CENTRED_MP_GENES_SOURCE <- file.path(CENTRED_REFERENCE_DIR, "intermediate", "merged_refined_mp_genes.rds")
+CENTRED_MP_GROUPING_SOURCE <- file.path(CENTRED_REFERENCE_DIR, "tables", "centred_refined_mp_state_grouping.csv")
+CENTRED_MP_GENES <- file.path(CENTRED_OUTPUT_DIR, "intermediate", "merged_refined_mp_genes.rds")
+CENTRED_UCELL <- file.path(CENTRED_OUTPUT_DIR, "intermediate", "merged_refined_ucell_scores.rds")
+CENTRED_STATES <- file.path(CENTRED_OUTPUT_DIR, "intermediate", "centred_refined_noreg_states.rds")
+CENTRED_MP_ADJ <- file.path(CENTRED_OUTPUT_DIR, "intermediate", "centred_refined_noreg_mp_adj.rds")
+CENTRED_GROUP_MAX <- file.path(CENTRED_OUTPUT_DIR, "intermediate", "centred_refined_noreg_group_max.rds")
+CENTRED_STATE_COLORS <- STATE_COLORS
+####################

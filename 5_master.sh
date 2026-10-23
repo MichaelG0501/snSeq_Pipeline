@@ -2,13 +2,18 @@
 #PBS -l select=1:ncpus=1:mem=2gb
 #PBS -l walltime=08:00:00
 #PBS -N snseq_master5
+#PBS -koed
+#PBS -o /rds/general/project/tumourheterogeneity1/live/snSeq_Pipeline/
+#PBS -e /rds/general/project/tumourheterogeneity1/live/snSeq_Pipeline/
+
+set -eo pipefail
 
 echo "$(date +%T)"
 
 module purge
 module load tools/dev
 
-WD=/rds/general/ephemeral/project/tumourheterogeneity1/ephemeral/snSeq_Pipeline
+WD=/rds/general/project/tumourheterogeneity1/live/snSeq_Pipeline
 MAX_JOBS=46
 USER_NAME=${USER:-$(whoami)}
 MANIFEST="${WD}/sn_outs/sample_manifest.csv"
@@ -25,7 +30,7 @@ skipped_samples=()
 
 while read -r sample; do
   [[ -n "${sample}" ]] || continue
-  while [[ $(qstat | grep "${USER_NAME}" | wc -l) -gt ${MAX_JOBS} ]]; do
+  while [[ $(/opt/pbs/bin/qstat | grep "${USER_NAME}" | wc -l) -ge ${MAX_JOBS} ]]; do
     sleep 180
   done
 
@@ -36,7 +41,7 @@ while read -r sample; do
   fi
 
   if [[ "${status_value}" == "ok" ]]; then
-    qsub -v sample="${sample}" -N "${sample}" 5_InferCNA.sh
+    /opt/pbs/bin/qsub -v sample="${sample}" -N "${sample}" 5_InferCNA.sh
     submitted_samples+=("${sample}")
   else
     skipped_samples+=("${sample}:${status_value:-missing_status}")

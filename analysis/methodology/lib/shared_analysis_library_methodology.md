@@ -18,13 +18,13 @@ The `analysis/lib/` files centralize constants and reusable helper functions so 
 
 - project paths
 - output-tier helpers
-- preferred state definition: Approach B, `noreg`
+- preferred state definition: current centred refined scRef projection, Approach B, `noreg`
 - metadata column names
 - QC and state thresholds
 - plot defaults for PPTX-readable figures
 - scRef MP descriptions
 - state groups and colors
-- fixed retained 3CA state map
+- current centred input/output paths; retained 3CA state map for legacy provenance only
 
 ## I/O Helpers
 
@@ -58,7 +58,8 @@ The `analysis/lib/` files centralize constants and reusable helper functions so 
 - MP labelling
 - final state ordering and color resolution
 - state-group maximum score calculation
-- preferred final state loading
+- strict current centred final-state loading, with no historical fallback
+- current threshold calls with exact barcode-name preservation
 
 ## Plot Helpers
 
@@ -67,3 +68,6 @@ The `analysis/lib/` files centralize constants and reusable helper functions so 
 ## Usage
 
 Workflow scripts should source only the helper files they actually need. Shared helpers are not standalone analysis workflows and should not write outputs by themselves.
+
+Full-gene UCell scoring uses the layer-extraction helper with all assayed genes,
+not a signature-only subset. Historical 3CA helpers do not change current states.

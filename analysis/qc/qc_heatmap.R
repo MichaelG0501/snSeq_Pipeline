@@ -46,7 +46,7 @@ file_arg <- grep("^--file=", args, value = TRUE)
 script_path <- if (length(file_arg) > 0) {
   normalizePath(sub("^--file=", "", file_arg[1]))
 } else {
-  normalizePath("/rds/general/ephemeral/project/tumourheterogeneity1/ephemeral/snSeq_Pipeline/analysis/qc/qc_heatmap.R")
+  normalizePath("/rds/general/project/tumourheterogeneity1/live/snSeq_Pipeline/analysis/qc/qc_heatmap.R")
 }
 
 analysis_dir <- dirname(script_path)

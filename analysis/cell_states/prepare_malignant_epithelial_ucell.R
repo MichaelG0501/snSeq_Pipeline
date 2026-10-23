@@ -4,6 +4,9 @@
 #   Script: analysis/cell_states/prepare_malignant_epithelial_ucell.R
 #   Methodology: analysis/methodology/cell_states/prepare_malignant_epithelial_ucell_methodology.md
 #   Map: analysis/ANALYSIS_MAP.md
+#   Downstream: assign_states_approach_b_noreg.R; current matched PDO comparison
+#   Cache: always rebuild; full-gene UCell ranking; no legacy score reuse
+#   PBS: qsub 8_geneNMF.sh (4 CPUs, 128 GB, 08:00:00, gnmf)
 #   Output tiers: sn_outs/cell_states/ucell_scoring/{intermediate,tables,figures,logs,reports}
 ####################
 
@@ -20,7 +23,7 @@
 #   sn_outs/by_samples/<sample>/infercna_status.txt
 #   sn_outs/by_samples/<sample>/malignancy_status.txt
 #   sn_outs/by_samples/<sample>/<sample>_epi_f.rds
-#   /rds/general/ephemeral/project/tumourheterogeneity1/ephemeral/scRef_Pipeline/ref_outs/Metaprogrammes_Results/geneNMF_metaprograms_nMP_19.rds
+#   /rds/general/project/tumourheterogeneity1/live/scRef_Pipeline/ref_outs/Metaprogrammes_Results/centred/mp_refinement/intermediate/merged_refined_mp_genes.rds
 #   /rds/general/project/tumourheterogeneity1/live/ITH_sc/PDOs/Count_Matrix/New_NMFs.csv
 #   /rds/general/project/tumourheterogeneity1/live/EAC_Ref_all/Cell_Cycle_Genes.csv
 #
@@ -32,8 +35,8 @@
 #   sn_outs/snSeq_malignant_epi_overall_summary.csv
 #   sn_outs/snSeq_malignant_epi_cc_top50.rds
 #   sn_outs/snSeq_malignant_epi_cc_score.rds
-#   sn_outs/Metaprogrammes_Results/geneNMF_metaprograms_nMP_19.rds
-#   sn_outs/Metaprogrammes_Results/UCell_nMP19_filtered.rds
+#   sn_outs/cell_states/centred/intermediate/merged_refined_mp_genes.rds
+#   sn_outs/cell_states/centred/intermediate/merged_refined_ucell_scores.rds
 #   sn_outs/UCell_3CA_MPs.rds
 #   sn_outs/cell_states/ucell_scoring/logs/prepare_malignant_epithelial_ucell.log
 #
@@ -51,7 +54,7 @@ suppressPackageStartupMessages({
 
 set.seed(1)
 
-source("/rds/general/ephemeral/project/tumourheterogeneity1/ephemeral/snSeq_Pipeline/analysis/lib/config.R")
+source("/rds/general/project/tumourheterogeneity1/live/snSeq_Pipeline/analysis/lib/config.R")
 source(file.path(ANALYSIS_DIR, "lib", "io_helpers.R"))
 source(file.path(ANALYSIS_DIR, "lib", "logging.R"))
 
@@ -60,24 +63,25 @@ out_dir <- SN_OUTS_DIR
 ref_outs_dir <- SCREF_OUTS_DIR
 setwd(out_dir)
 
-dir.create("Metaprogrammes_Results", recursive = TRUE, showWarnings = FALSE)
+centred_dirs <- ensure_output_dirs("cell_states/centred")
 output_dirs <- ensure_output_dirs("cell_states/ucell_scoring")
 
 run_summary <- start_run_summary(
   script = "analysis/cell_states/prepare_malignant_epithelial_ucell.R",
   inputs = c(
     file.path(out_dir, "sample_manifest.csv"),
-    file.path(ref_outs_dir, "Metaprogrammes_Results", "geneNMF_metaprograms_nMP_19.rds"),
+    CENTRED_MP_GENES_SOURCE, CENTRED_MP_GROUPING_SOURCE,
     "/rds/general/project/tumourheterogeneity1/live/ITH_sc/PDOs/Count_Matrix/New_NMFs.csv",
     "/rds/general/project/tumourheterogeneity1/live/EAC_Ref_all/Cell_Cycle_Genes.csv"
   ),
   outputs = c(
     file.path(out_dir, "snSeq_malignant_epi.rds"),
-    file.path(out_dir, "Metaprogrammes_Results", "UCell_nMP19_filtered.rds"),
+    CENTRED_UCELL,
     file.path(out_dir, "UCell_3CA_MPs.rds")
   ),
   parameters = list(
     state_method = PREFERRED_STATE_DEFINITION$label,
+    scoring_gene_universe = "all_assayed_genes", ncores = 4L, ucell_max_rank = 1500L,
     malignant_labels = c("malignant_level_1", "malignant_level_2")
   )
 )
@@ -103,37 +107,32 @@ status_rows <- lapply(manifest$sample, function(sample) {
   )
 }) %>% bind_rows()
 
-eligible_samples <- status_rows$sample[
+eligible_samples <- status_rows$sample[which(
   status_rows$expr_filter_status == "ok" &
     status_rows$infercna_status == "ok" &
     status_rows$malignancy_status == "ok" &
     status_rows$epi_f_present
-]
+)]
 
 if (length(eligible_samples) == 0) {
   stop("No completed malignancy outputs available for malignant epithelial merge.")
 }
 
-local_mp_path <- file.path("Metaprogrammes_Results", "geneNMF_metaprograms_nMP_19.rds")
-source_mp_path <- file.path(ref_outs_dir, "Metaprogrammes_Results", "geneNMF_metaprograms_nMP_19.rds")
-
-if (file.exists(local_mp_path)) {
-  geneNMF.metaprograms <- readRDS(local_mp_path)
-} else {
-  geneNMF.metaprograms <- readRDS(source_mp_path)
-  saveRDS(geneNMF.metaprograms, local_mp_path)
-}
-
-writeLines(
-  source_mp_path,
-  con = file.path("Metaprogrammes_Results", "geneNMF_metaprograms_nMP_19_source.txt")
-)
-
-mp.genes <- geneNMF.metaprograms$metaprograms.genes
-bad_mps <- which(geneNMF.metaprograms$metaprograms.metrics$silhouette < 0)
-if (length(bad_mps) > 0) {
-  mp.genes <- mp.genes[!names(mp.genes) %in% paste0("MP", bad_mps)]
-}
+####################
+# Use only the current, already filtered centred reference gene collection.
+require_files(c(CENTRED_MP_GENES_SOURCE, CENTRED_MP_GROUPING_SOURCE))
+mp.genes <- readRDS(CENTRED_MP_GENES_SOURCE)
+mp_grouping <- read.csv(CENTRED_MP_GROUPING_SOURCE, check.names = FALSE)
+stopifnot(is.list(mp.genes), !anyDuplicated(names(mp.genes)),
+          all(c("mp", "state", "description") %in% names(mp_grouping)),
+          !anyDuplicated(mp_grouping$mp), setequal(names(mp.genes), mp_grouping$mp))
+mp.genes <- mp.genes[mp_grouping$mp]
+saveRDS(mp.genes, CENTRED_MP_GENES)
+write.csv(mp_grouping, file.path(centred_dirs["tables"], "centred_refined_mp_state_grouping.csv"), row.names = FALSE)
+writeLines(c(CENTRED_MP_GENES_SOURCE, CENTRED_MP_GROUPING_SOURCE,
+             unname(tools::md5sum(c(CENTRED_MP_GENES_SOURCE, CENTRED_MP_GROUPING_SOURCE)))),
+           file.path(centred_dirs["reports"], "reference_provenance.txt"))
+####################
 
 required_meta_cols <- c("orig.ident", "reference_batch", "technology", "classification", "malignancy")
 
@@ -218,14 +217,13 @@ if (length(tmdata_malignant) > 1) {
 saveRDS(merged_obj, file.path(out_dir, "snSeq_malignant_epi.rds"))
 saveRDS(merged_obj@meta.data, file.path(out_dir, "snSeq_malignant_epi_meta.rds"))
 
-mp.genes <- lapply(mp.genes, function(genes) {
-  intersect(unique(genes), rownames(merged_obj))
-})
-mp.genes <- mp.genes[lengths(mp.genes) > 0]
-
-if (length(mp.genes) == 0) {
-  stop("No retained scRef metaprogram genes overlap the snRNA-seq malignant epithelial object.")
-}
+####################
+# Record overlap without silently dropping any reference MP.
+mp_overlap <- data.frame(mp = names(mp.genes), signature_genes = lengths(mp.genes),
+                        detected_genes = vapply(mp.genes, function(x) sum(x %in% rownames(merged_obj)), integer(1)))
+write.csv(mp_overlap, file.path(centred_dirs["tables"], "mp_gene_overlap.csv"), row.names = FALSE)
+if (any(mp_overlap$detected_genes == 0L)) stop("A required centred MP has no genes in the expression matrix.")
+####################
 
 MP_df <- read.csv(
   "/rds/general/project/tumourheterogeneity1/live/ITH_sc/PDOs/Count_Matrix/New_NMFs.csv",
@@ -245,22 +243,32 @@ if (length(MP_list) == 0) {
   stop("No 3CA metaprogram genes overlap the snRNA-seq malignant epithelial object.")
 }
 
-ncores_use <- min(8L, max(1L, parallel::detectCores()))
+ncores_use <- 4L
 cell_cycle_genes <- read.csv(
   "/rds/general/project/tumourheterogeneity1/live/EAC_Ref_all/Cell_Cycle_Genes.csv",
   stringsAsFactors = FALSE
 )[, 1:3]
 cc_consensus_genes <- unique(cell_cycle_genes$Gene[cell_cycle_genes$Consensus == 1])
-scoring_genes <- unique(c(unlist(mp.genes), unlist(MP_list), cc_consensus_genes))
+####################
+# UCell ranks every assayed gene, not only the signature genes.
+scoring_genes <- rownames(merged_obj)
+####################
 scoring_expr <- extract_layer_matrix_subset(merged_obj, scoring_genes, assay = "RNA", layer_prefix = "data")
 
 ucell_scores <- ScoreSignatures_UCell(
   scoring_expr,
   features = mp.genes,
   ncores = ncores_use,
+  maxRank = 1500L,
   name = ""
 )
-saveRDS(ucell_scores, file.path("Metaprogrammes_Results", "UCell_nMP19_filtered.rds"))
+####################
+stopifnot(setequal(rownames(ucell_scores), Cells(merged_obj)),
+          identical(colnames(ucell_scores), names(mp.genes)),
+          all(is.finite(as.matrix(ucell_scores))))
+ucell_scores <- ucell_scores[Cells(merged_obj), , drop = FALSE]
+saveRDS(ucell_scores, CENTRED_UCELL)
+####################
 
 write.csv(
   data.frame(
@@ -268,7 +276,7 @@ write.csv(
     genes_in_signature = lengths(mp.genes),
     stringsAsFactors = FALSE
   ),
-  file.path("Metaprogrammes_Results", "UCell_nMP19_filtered_summary.csv"),
+  file.path(centred_dirs["tables"], "ucell_signature_summary.csv"),
   row.names = FALSE,
   quote = TRUE
 )
@@ -277,6 +285,7 @@ ucell_3ca <- ScoreSignatures_UCell(
   scoring_expr,
   features = MP_list,
   ncores = ncores_use,
+  maxRank = 1500L,
   name = ""
 )
 saveRDS(ucell_3ca, file.path(out_dir, "UCell_3CA_MPs.rds"))

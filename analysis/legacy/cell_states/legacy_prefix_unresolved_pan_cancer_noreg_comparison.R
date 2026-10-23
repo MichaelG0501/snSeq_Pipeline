@@ -40,7 +40,7 @@ library(dplyr)
 library(tidyr)
 library(scales)
 
-source("/rds/general/ephemeral/project/tumourheterogeneity1/ephemeral/snSeq_Pipeline/analysis/lib/config.R")
+source("/rds/general/project/tumourheterogeneity1/live/snSeq_Pipeline/analysis/lib/config.R")
 source(file.path(ANALYSIS_DIR, "lib", "state_helpers.R"))
 source(file.path(ANALYSIS_DIR, "lib", "logging.R"))
 

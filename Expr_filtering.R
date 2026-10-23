@@ -16,7 +16,7 @@ reticulate::use_condaenv(
 
 set.seed(1)
 
-setwd("/rds/general/ephemeral/project/tumourheterogeneity1/ephemeral/snSeq_Pipeline/sn_outs")
+setwd("/rds/general/project/tumourheterogeneity1/live/snSeq_Pipeline/sn_outs")
 
 target_celltypes <- c(
   "epithelial", "endothelial", "fibroblast", "macrophage", "b.cell",

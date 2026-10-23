@@ -1,447 +1,142 @@
 ####################
 # Analysis registry:
-#   Status: active
+#   Status: active upstream/terminal
 #   Script: analysis/cell_states/assign_states_approach_b_noreg.R
 #   Methodology: analysis/methodology/cell_states/assign_states_approach_b_noreg_methodology.md
 #   Map: analysis/ANALYSIS_MAP.md
-#   Output tiers: sn_outs/cell_states/state_assignment/{intermediate,tables,figures,logs,reports}
+#   Description: Project current centred scRef MP groups into malignant snRNA cells.
+#   Inputs (live sn_outs): snSeq_malignant_epi_meta.rds;
+#     cell_states/centred/intermediate/merged_refined_ucell_scores.rds;
+#     cell_states/centred/tables/centred_refined_mp_state_grouping.csv.
+#   Outputs under live sn_outs/cell_states/centred/:
+#     intermediate/centred_refined_noreg_{states,mp_adj,group_max}.rds;
+#     intermediate/state_assignment_cache.rds;
+#     tables/centred_refined_noreg_{sample_state_abundance,cell_assignments}.csv;
+#     figures/Auto_final/01_centred_state_summary.pdf; logs/state_assignment.log.
+#   Downstream: PDO legacy_Auto_pdo_sn_matched_pair_comparison.R (current route).
+#   Cache: default rebuild; plot_only=true requires matching input fingerprints.
+#   Run: qsub cell_states_master.sh (4 CPUs, 64 GB, 08:00:00; dmtcp).
 ####################
 
-####################
-# assign_states_approach_b_noreg.R
-#
-# Assign malignant epithelial cells to the selected state definition:
-# Approach B, noreg. Scores are centered by sample and scaled by
-# reference_batch, then cell states are called from grouped scRef
-# metaprograms with explicit Unresolved and Hybrid thresholds.
-#
-# Input:
-#   sn_outs/snSeq_malignant_epi.rds
-#   sn_outs/Metaprogrammes_Results/geneNMF_metaprograms_nMP_19.rds
-#   sn_outs/Metaprogrammes_Results/UCell_nMP19_filtered.rds
-#   sn_outs/snSeq_malignant_epi_cc_score.rds
-#
-# Output:
-#   sn_outs/Auto_topmp_v2_noreg_states_B.rds
-#   sn_outs/Auto_topmp_v2_noreg_mp_adj.rds
-#   sn_outs/Auto_topmp_v2_noreg_group_max.rds
-#   sn_outs/Auto_topmp_v2_noreg_heatmap_B_cconly.pdf
-#   sn_outs/Auto_topmp_v2_noreg_proportion_B_withpie.pdf
-#   sn_outs/Auto_topmp_v2_noreg_ccscore_boxplot_B.pdf
-#   sn_outs/Auto_topmp_v2_noreg_summary.csv
-#   sn_outs/cell_states/state_assignment/intermediate/approach_b_noreg_cache.rds
-#   sn_outs/cell_states/state_assignment/logs/assign_states_approach_b_noreg.log
-#
-# Usage:
-#   Rscript analysis/cell_states/assign_states_approach_b_noreg.R
-#   Rscript analysis/cell_states/assign_states_approach_b_noreg.R plot_only=true
-####################
-
-library(Seurat)
-library(ComplexHeatmap)
-library(circlize)
-library(ggplot2)
-library(dplyr)
-library(tidyr)
-library(patchwork)
-library(scales)
-library(grid)
-
-source("/rds/general/ephemeral/project/tumourheterogeneity1/ephemeral/snSeq_Pipeline/analysis/lib/config.R")
-source(file.path(ANALYSIS_DIR, "lib", "state_helpers.R"))
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(tidyr)
+  library(ggplot2)
+  library(ComplexHeatmap)
+  library(circlize)
+})
+source("/rds/general/project/tumourheterogeneity1/live/snSeq_Pipeline/analysis/lib/config.R")
 source(file.path(ANALYSIS_DIR, "lib", "io_helpers.R"))
+source(file.path(ANALYSIS_DIR, "lib", "state_helpers.R"))
 source(file.path(ANALYSIS_DIR, "lib", "logging.R"))
-
 setwd(SN_OUTS_DIR)
+
+####################
 args_kv <- parse_key_value_args()
 plot_only <- arg_flag(args_kv, "plot_only", FALSE)
-output_dirs <- ensure_output_dirs("cell_states/state_assignment")
-cache_path <- file.path(output_dirs["intermediate"], "approach_b_noreg_cache.rds")
-
+output_dirs <- ensure_output_dirs("cell_states/centred")
+meta_path <- file.path(SN_OUTS_DIR, "snSeq_malignant_epi_meta.rds")
+group_path <- file.path(output_dirs["tables"], "centred_refined_mp_state_grouping.csv")
+input_files <- c(meta_path, CENTRED_UCELL, group_path)
+require_files(input_files)
+fingerprints <- tools::md5sum(input_files)
+cache_path <- file.path(output_dirs["intermediate"], "state_assignment_cache.rds")
 run_summary <- start_run_summary(
-  script = "analysis/cell_states/assign_states_approach_b_noreg.R",
-  inputs = c(
-    file.path(SN_OUTS_DIR, "snSeq_malignant_epi.rds"),
-    file.path(SN_OUTS_DIR, "Metaprogrammes_Results", "geneNMF_metaprograms_nMP_19.rds"),
-    file.path(SN_OUTS_DIR, "Metaprogrammes_Results", "UCell_nMP19_filtered.rds"),
-    file.path(SN_OUTS_DIR, "snSeq_malignant_epi_cc_score.rds")
-  ),
-  outputs = c(
-    file.path(SN_OUTS_DIR, "Auto_topmp_v2_noreg_states_B.rds"),
-    file.path(SN_OUTS_DIR, "Auto_topmp_v2_noreg_mp_adj.rds"),
-    file.path(SN_OUTS_DIR, "Auto_topmp_v2_noreg_group_max.rds"),
-    cache_path
-  ),
-  parameters = list(
-    state_method = PREFERRED_STATE_DEFINITION$label,
-    threshold = STATE_THRESHOLDS$approach_b_min_best_score,
-    hybrid_gap = STATE_THRESHOLDS$approach_b_hybrid_gap,
-    plot_only = plot_only
-  ),
+  "analysis/cell_states/assign_states_approach_b_noreg.R", inputs = input_files,
+  outputs = c(CENTRED_STATES, CENTRED_MP_ADJ, CENTRED_GROUP_MAX),
+  parameters = c(STATE_THRESHOLDS, list(batch = "reference_batch", plot_only = plot_only)),
   cached_reused = plot_only
 )
-
-####################
-# load data
-####################
-tmdata_all <- readRDS("snSeq_malignant_epi.rds")
-geneNMF.metaprograms <- readRDS("Metaprogrammes_Results/geneNMF_metaprograms_nMP_19.rds")
-ucell_scores <- readRDS("Metaprogrammes_Results/UCell_nMP19_filtered.rds")
-cc_score <- readRDS("snSeq_malignant_epi_cc_score.rds")
-
-mp_descriptions <- MP_DESCRIPTIONS
-cc_mps <- CC_MPS
-state_groups <- STATE_GROUPS
-group_cols <- STATE_COLORS[names(STATE_COLORS) %in% c(names(STATE_GROUPS), "Unresolved", "Hybrid")]
-
-make_cna_palette <- function(cna_vec) {
-  cna_levels <- sort(unique(as.character(cna_vec[!is.na(cna_vec)])))
-  if (length(cna_levels) == 0) {
-    cna_levels <- "unknown"
-  }
-  cna_palette <- setNames(rep("grey70", length(cna_levels)), cna_levels)
-  if ("cna_malignant" %in% names(cna_palette)) cna_palette["cna_malignant"] <- "black"
-  if ("cna_unresolved" %in% names(cna_palette)) cna_palette["cna_unresolved"] <- "grey70"
-  if ("cna_non_malignant" %in% names(cna_palette)) cna_palette["cna_non_malignant"] <- "white"
-  cna_palette
-}
-
-make_state_heatmap <- function(state_vec, mp_adj_all) {
-  set.seed(42)
-  MAX_CELLS_TOTAL <- 8000
-  state_counts <- table(state_vec)
-  state_fracs <- state_counts / sum(state_counts)
-  cells_per_state <- pmax(round(state_fracs * MAX_CELLS_TOTAL), 20)
-  state_cells <- split(names(state_vec), state_vec)
-  cells_to_plot <- unlist(
-    mapply(
-      function(cells, n) sample(cells, min(length(cells), n)),
-      state_cells,
-      cells_per_state[names(state_cells)],
-      SIMPLIFY = FALSE
-    ),
-    use.names = FALSE
-  )
-
-  sub_scores_orig <- t(mp_adj_all[cells_to_plot, , drop = FALSE])
-  cc_block_order <- cc_mps[cc_mps %in% rownames(sub_scores_orig)]
-  non_cc_block_order <- mp_tree_order_names[
-    mp_tree_order_names %in% rownames(sub_scores_orig) & !(mp_tree_order_names %in% cc_mps)
-  ]
-  mp_row_order <- c(cc_block_order, non_cc_block_order)
-  sub_scores <- sub_scores_orig[mp_row_order, , drop = FALSE]
-
-  mp_label_map <- mp_descriptions
-  missing_mps <- setdiff(rownames(sub_scores), names(mp_label_map))
-  if (length(missing_mps) > 0) mp_label_map[missing_mps] <- missing_mps
-  rownames(sub_scores) <- mp_label_map[rownames(sub_scores)]
-
-  present_states <- intersect(state_level_order, unique(as.character(state_vec[cells_to_plot])))
-  if (length(present_states) == 0) {
-    present_states <- unique(as.character(state_vec[cells_to_plot]))
-  }
-  split_vec <- factor(as.character(state_vec[cells_to_plot]), levels = present_states)
-
-  state_df_full <- data.frame(
-    cell = names(state_vec),
-    state = as.character(state_vec),
-    sample = as.character(tmdata_all@meta.data[names(state_vec), "orig.ident"]),
-    study = as.character(tmdata_all@meta.data[names(state_vec), "reference_batch"]),
-    stringsAsFactors = FALSE
-  )
-  total_samples <- length(unique(state_df_full$sample))
-  total_studies <- length(unique(state_df_full$study))
-  state_div_df <- state_df_full %>%
-    group_by(state) %>%
-    summarise(
-      sample_cov = n_distinct(sample) / max(total_samples, 1),
-      study_cov = n_distinct(study) / max(total_studies, 1),
-      diversity_score = 0.5 * sample_cov + 0.5 * study_cov,
-      .groups = "drop"
-    )
-  state_div_map <- setNames(state_div_df$diversity_score, state_div_df$state)
-  state_div_vals <- state_div_map[as.character(split_vec)]
-  state_div_vals[is.na(state_div_vals)] <- 0
-  names(state_div_vals) <- cells_to_plot
-
-  local_group_cols <- group_cols[names(group_cols) %in% present_states]
-  for (st in present_states) {
-    if (!st %in% names(local_group_cols)) local_group_cols[st] <- "grey80"
-  }
-  local_group_cols <- local_group_cols[present_states]
-
-  study_levels <- unique(as.character(tmdata_all$reference_batch))
-  study_vals <- tmdata_all@meta.data[cells_to_plot, "reference_batch"]
-  study_cols <- setNames(
-    DiscretePalette(length(study_levels), palette = "polychrome"),
-    study_levels
-  )
-
-  max_cc <- max(cc_score[cells_to_plot], na.rm = TRUE)
-  if (!is.finite(max_cc) || max_cc <= 0) max_cc <- 1
-
-  col_ann <- HeatmapAnnotation(
-    State = split_vec,
-    CNA = cna_status[cells_to_plot],
-    CC_score = cc_score[cells_to_plot],
-    Diversity = state_div_vals,
-    Study = study_vals,
-    col = list(
-      State = local_group_cols,
-      CNA = cna_palette,
-      CC_score = colorRamp2(c(0, max_cc), c("white", "darkgreen")),
-      Diversity = colorRamp2(c(0, 1), c("grey95", "purple4")),
-      Study = study_cols
-    ),
-    annotation_name_side = "left",
-    show_legend = TRUE,
-    na_col = "white"
-  )
-
-  mp_to_group <- rep("Other", length(mp_row_order))
-  names(mp_to_group) <- mp_row_order
-  mp_to_group[cc_mps[cc_mps %in% names(mp_to_group)]] <- "Cell_cycle"
-  for (grp in names(state_groups)) {
-    grp_mps <- intersect(state_groups[[grp]], names(mp_to_group))
-    mp_to_group[grp_mps] <- grp
-  }
-  group_colors_row <- c(group_cols[ordered_group_names], Cell_cycle = "gold", Other = "grey70")
-  mp_group_label <- mp_to_group
-  names(mp_group_label) <- rownames(sub_scores)
-
-  row_ann <- rowAnnotation(
-    MP_group = factor(mp_group_label, levels = c("Cell_cycle", ordered_group_names, "Other")),
-    col = list(MP_group = group_colors_row),
-    show_annotation_name = FALSE
-  )
-
-  lim <- as.numeric(quantile(abs(sub_scores), 0.98, na.rm = TRUE))
-  if (!is.finite(lim) || lim == 0) lim <- 1
-  col_fun_sc <- colorRamp2(c(-lim, 0, lim), c("navy", "white", "firebrick3"))
-
-  Heatmap(
-    sub_scores,
-    name = "Adj score",
-    col = col_fun_sc,
-    top_annotation = col_ann,
-    left_annotation = row_ann,
-    column_split = split_vec,
-    column_order = (function() {
-      col_order_list <- lapply(levels(split_vec), function(lvl) {
-        idx <- which(as.character(split_vec) == lvl)
-        if (length(idx) <= 1) return(idx)
-        mat_lvl <- sub_scores[, idx, drop = FALSE]
-        dcols <- dist(t(mat_lvl))
-        hc <- hclust(dcols, method = "ward.D2")
-        idx[hc$order]
-      })
-      full_ord <- unlist(col_order_list, use.names = FALSE)
-      if (length(full_ord) != ncol(sub_scores) || !setequal(full_ord, seq_len(ncol(sub_scores)))) {
-        return(seq_len(ncol(sub_scores)))
-      }
-      full_ord
-    })(),
-    column_gap = unit(1.5, "mm"),
-    row_split = factor(
-      ifelse(mp_row_order %in% cc_mps, "Cell_cycle_MPs", "Other_MPs"),
-      levels = c("Cell_cycle_MPs", "Other_MPs")
-    ),
-    row_gap = unit(2.5, "mm"),
-    cluster_rows = FALSE,
-    cluster_columns = FALSE,
-    show_row_dend = FALSE,
-    row_names_side = "left",
-    row_names_gp = gpar(fontsize = 9, fontface = "italic"),
-    show_column_names = FALSE,
-    column_title_rot = 30,
-    column_title_gp = gpar(fontsize = 10, fontface = "bold"),
-    use_raster = TRUE,
-    raster_quality = 5,
-    border = FALSE,
-    rect_gp = gpar(col = NA)
-  )
-}
-
-make_prop_and_pie <- function(state_vec) {
-  prop_df <- data.frame(
-    state = as.character(state_vec),
-    study = as.character(tmdata_all@meta.data[names(state_vec), "reference_batch"]),
-    stringsAsFactors = FALSE
-  )
-  overall <- prop_df %>% count(state) %>% mutate(study = "Overall", pct = 100 * n / sum(n))
-  per_study <- prop_df %>%
-    count(study, state) %>%
-    group_by(study) %>%
-    mutate(pct = 100 * n / sum(n)) %>%
-    ungroup()
-  plot_df <- bind_rows(overall, per_study)
-  plot_df$state <- factor(plot_df$state, levels = state_level_order)
-
-  p_bar <- ggplot(plot_df, aes(study, pct, fill = state)) +
-    geom_col(color = "black", linewidth = 0.2) +
-    geom_text(aes(label = sprintf("%.1f%%", pct)), position = position_stack(vjust = 0.5), size = 2.6) +
-    scale_fill_manual(values = group_cols, drop = FALSE) +
-    labs(title = "Approach B noreg: state proportions", x = NULL, y = "% of cells", fill = "State") +
-    theme_minimal(base_size = 12) +
-    theme(axis.text.x = element_text(angle = 45, hjust = 1))
-
-  pie_df <- overall %>% mutate(label = paste0(state, "\n", sprintf("%.1f%%", pct)))
-  p_pie <- ggplot(pie_df, aes(x = "", y = pct, fill = state)) +
-    geom_col(width = 1, color = "white") +
-    coord_polar(theta = "y") +
-    geom_text(aes(label = label), position = position_stack(vjust = 0.5), size = 3) +
-    scale_fill_manual(values = group_cols, drop = FALSE) +
-    labs(title = "Approach B noreg: overall pie", fill = "State") +
-    theme_void(base_size = 11)
-
-  list(bar = p_bar, pie = p_pie, overall = overall)
-}
-
-make_cc_box <- function(state_vec) {
-  cc_df <- data.frame(
-    state = factor(as.character(state_vec[names(cc_score)]), levels = state_level_order),
-    cc_score = as.numeric(cc_score[names(state_vec)]),
-    stringsAsFactors = FALSE
-  ) %>%
-    filter(!is.na(state))
-
-  ggplot(cc_df, aes(state, cc_score, fill = state)) +
-    geom_boxplot(outlier.shape = NA, alpha = 0.85) +
-    geom_jitter(width = 0.15, size = 0.15, alpha = 0.2) +
-    scale_fill_manual(values = group_cols, drop = FALSE) +
-    labs(title = "Approach B noreg: cell-cycle score by state", x = NULL, y = "Cell-cycle score") +
-    theme_classic(base_size = 12) +
-    theme(axis.text.x = element_text(angle = 35, hjust = 1), legend.position = "none")
-}
-
-####################
-# align cells and derive noreg states
-####################
-mp.genes <- geneNMF.metaprograms$metaprograms.genes
-bad_mps <- which(geneNMF.metaprograms$metaprograms.metrics$silhouette < 0)
-if (length(bad_mps) > 0) {
-  mp.genes <- mp.genes[!names(mp.genes) %in% paste0("MP", bad_mps)]
-}
-retained_mps <- names(mp.genes)
-non_cc_mps <- setdiff(retained_mps, cc_mps)
-
-state_ordered_mps <- unlist(state_groups, use.names = FALSE)
-orig_tree_order <- geneNMF.metaprograms$programs.tree$order
-orig_clusters <- geneNMF.metaprograms$programs.clusters[orig_tree_order]
-orig_order <- paste0("MP", unique(orig_clusters))
-orig_order <- orig_order[orig_order %in% retained_mps]
-reordered_mps <- c(
-  orig_order[orig_order %in% cc_mps],
-  state_ordered_mps[state_ordered_mps %in% retained_mps]
-)
-reordered_mps <- unique(c(reordered_mps, orig_order))
-mp_tree_order_names <- reordered_mps
-
-group_order_pos <- sapply(state_groups, function(mps) {
-  positions <- match(mps, mp_tree_order_names)
-  if (all(is.na(positions))) return(Inf)
-  min(positions, na.rm = TRUE)
-})
-ordered_group_names <- names(sort(group_order_pos))
-state_level_order <- c(ordered_group_names, "Unresolved", "Hybrid")
-
-common_cells <- intersect(rownames(ucell_scores), Cells(tmdata_all))
-tmdata_all <- tmdata_all[, common_cells]
-ucell_scores <- ucell_scores[common_cells, , drop = FALSE]
-cc_score <- cc_score[common_cells]
-
-sample_var <- tmdata_all$orig.ident
-study_var <- tmdata_all$reference_batch
-names(sample_var) <- Cells(tmdata_all)
-names(study_var) <- Cells(tmdata_all)
-
-cna_status <- as.character(tmdata_all@meta.data[common_cells, "classification"])
-names(cna_status) <- common_cells
-cna_palette <- make_cna_palette(cna_status)
-
+meta <- readRDS(meta_path)
+grouping <- read.csv(group_path, check.names = FALSE, stringsAsFactors = FALSE)
+stopifnot(all(c("mp", "state", "description") %in% names(grouping)),
+          !anyDuplicated(grouping$mp), !anyNA(grouping),
+          all(c("orig.ident", "reference_batch", "malignancy") %in% names(meta)),
+          !anyDuplicated(rownames(meta)),
+          all(meta$malignancy %in% c("malignant_level_1", "malignant_level_2")),
+          !anyNA(meta[, c("orig.ident", "reference_batch")]))
+biological_states <- unique(grouping$state[grouping$state != "Cell cycle"])
+state_levels <- c(biological_states, "Unresolved", "Hybrid")
+stopifnot(setequal(state_levels, names(CENTRED_STATE_COLORS)))
+state_groups <- setNames(lapply(biological_states, function(x) grouping$mp[grouping$state == x]), biological_states)
+non_cc_mps <- unlist(state_groups, use.names = FALSE)
 if (plot_only) {
-  require_files(cache_path, label = "state-assignment cache")
+  require_files(cache_path)
   cached <- readRDS(cache_path)
-  state_B <- cached$state_B
-  mp_adj_noncc <- cached$mp_adj_noncc
-  mp_adj_all <- cached$mp_adj_all
+  if (!identical(cached$fingerprints, fingerprints)) stop("Input files changed; rebuild state assignment before plot_only.")
+  states <- cached$states
+  mp_adj <- cached$mp_adj
   group_max <- cached$group_max
 } else {
-  retained_in_ucell <- intersect(retained_mps, colnames(ucell_scores))
-  cc_in_ucell <- intersect(cc_mps, retained_in_ucell)
-  non_cc_in_ucell <- intersect(non_cc_mps, retained_in_ucell)
-
-  ucell_mat <- as.matrix(ucell_scores[, retained_in_ucell, drop = FALSE])
-  Y_use <- ucell_mat[, non_cc_in_ucell, drop = FALSE]
-  mp_adj_noncc <- z_normalise(Y_use, sample_var, study_var)
-  cc_raw <- as.matrix(ucell_scores[common_cells, cc_in_ucell, drop = FALSE])
-  mp_adj_cc <- z_normalise(cc_raw, sample_var, study_var)
-  mp_adj_all <- cbind(mp_adj_noncc, mp_adj_cc)
-
-  group_max <- build_group_max(mp_adj_noncc, state_groups)
-
-  best_group_idx <- max.col(group_max, ties.method = "first")
-  best_group_val <- apply(group_max, 1, max)
-  base_state <- names(state_groups)[best_group_idx]
-  base_state[best_group_val < STATE_THRESHOLDS$approach_b_min_best_score] <- "Unresolved"
-
-  sorted_groups <- t(apply(group_max, 1, sort, decreasing = TRUE))
-  gap <- sorted_groups[, 1] - sorted_groups[, 2]
-  state_B <- base_state
-  state_B[(gap < STATE_THRESHOLDS$approach_b_hybrid_gap) & (base_state != "Unresolved")] <- "Hybrid"
-  names(state_B) <- rownames(group_max)
-
-  saveRDS(state_B, "Auto_topmp_v2_noreg_states_B.rds")
-  saveRDS(mp_adj_noncc, "Auto_topmp_v2_noreg_mp_adj.rds")
-  saveRDS(group_max, "Auto_topmp_v2_noreg_group_max.rds")
-  saveRDS(
-    list(state_B = state_B, mp_adj_noncc = mp_adj_noncc, mp_adj_all = mp_adj_all, group_max = group_max),
-    cache_path
-  )
+  scores <- as.matrix(readRDS(CENTRED_UCELL))
+  stopifnot(!anyDuplicated(rownames(scores)), !anyDuplicated(colnames(scores)),
+            setequal(rownames(scores), rownames(meta)),
+            setequal(colnames(scores), grouping$mp), all(is.finite(scores)))
+  scores <- scores[rownames(meta), grouping$mp, drop = FALSE]
+  samples <- setNames(as.character(meta$orig.ident), rownames(meta))
+  batches <- setNames(as.character(meta$reference_batch), rownames(meta))
+  mp_adj <- z_normalise(scores, samples, batches)
+  group_max <- build_group_max(mp_adj, state_groups)
+  stopifnot(identical(rownames(group_max), rownames(meta)), all(is.finite(group_max)))
+  states <- call_approach_b_states(group_max)
+  saveRDS(states, CENTRED_STATES)
+  saveRDS(mp_adj, CENTRED_MP_ADJ)
+  saveRDS(group_max, CENTRED_GROUP_MAX)
+  saveRDS(list(states = states, mp_adj = mp_adj, group_max = group_max,
+               fingerprints = fingerprints, thresholds = STATE_THRESHOLDS), cache_path)
 }
-
-####################
-# outputs
-####################
-pdf("Auto_topmp_v2_noreg_heatmap_B_cconly.pdf", width = 18, height = 8, useDingbats = FALSE)
-draw(make_state_heatmap(state_B, mp_adj_all), merge_legend = TRUE)
-grid.text(
-  "Approach B - No regress",
-  x = unit(2, "mm"),
-  y = unit(1, "npc") - unit(2, "mm"),
-  just = c("left", "top"),
-  gp = gpar(fontsize = 12, fontface = "bold")
+stopifnot(identical(names(states), rownames(meta)), identical(rownames(mp_adj), names(states)),
+          all(states %in% state_levels))
+top_mp <- colnames(mp_adj)[max.col(mp_adj, ties.method = "first")]
+top_state_mp <- non_cc_mps[max.col(mp_adj[, non_cc_mps, drop = FALSE], ties.method = "first")]
+assignments <- data.frame(
+  cell = names(states), sample = as.character(meta$orig.ident),
+  reference_batch = as.character(meta$reference_batch), state = unname(states),
+  top_mp = top_mp, top_state_mp = top_state_mp,
+  top_state_mp_group = grouping$state[match(top_state_mp, grouping$mp)]
 )
+write.csv(assignments, file.path(output_dirs["tables"], "centred_refined_noreg_cell_assignments.csv"), row.names = FALSE)
+abundance <- assignments %>% count(sample, reference_batch, state, name = "n") %>%
+  complete(nesting(sample, reference_batch), state = state_levels, fill = list(n = 0L)) %>%
+  group_by(sample, reference_batch) %>% mutate(total_n = sum(n), pct = 100 * n / total_n) %>% ungroup()
+stopifnot(sum(abundance$n) == nrow(meta))
+write.csv(abundance, file.path(output_dirs["tables"], "centred_refined_noreg_sample_state_abundance.csv"), row.names = FALSE)
+write.csv(data.frame(state = state_levels, n = as.integer(table(factor(states, levels = state_levels)))),
+          file.path(output_dirs["tables"], "centred_refined_noreg_state_counts.csv"), row.names = FALSE)
+
+final_dir <- file.path(output_dirs["figures"], "Auto_final")
+dir.create(final_dir, recursive = TRUE, showWarnings = FALSE)
+pdf_path <- file.path(final_dir, "01_centred_state_summary.pdf")
+sample_order <- unique(abundance$sample[order(abundance$reference_batch, abundance$sample)])
+abundance$sample <- factor(abundance$sample, levels = sample_order)
+abundance$state <- factor(abundance$state, levels = state_levels)
+pdf(pdf_path, width = 18, height = 9, onefile = TRUE)
+print(ggplot(abundance, aes(sample, pct, fill = state)) + geom_col() +
+        facet_grid(~ reference_batch, scales = "free_x", space = "free_x") +
+        scale_fill_manual(values = CENTRED_STATE_COLORS, drop = FALSE) +
+        labs(x = NULL, y = "% malignant epithelial cells", fill = "State",
+             title = "Current centred scRef states projected onto snRNA-seq") +
+        theme_bw(base_size = 15) + theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 10)))
+set.seed(1)
+plot_cells <- unlist(lapply(state_levels, function(s) {
+  cells <- names(states)[states == s]
+  if (length(cells) > 500L) sample(cells, 500L) else cells
+}), use.names = FALSE)
+plot_matrix <- t(mp_adj[plot_cells, grouping$mp, drop = FALSE])
+rownames(plot_matrix) <- paste(grouping$mp, grouping$description)
+lim <- max(as.numeric(quantile(abs(plot_matrix), 0.98)), 0.01)
+ComplexHeatmap::draw(ComplexHeatmap::Heatmap(
+  plot_matrix, name = "Adjusted score", col = circlize::colorRamp2(c(-lim, 0, lim), c("navy", "white", "firebrick3")),
+  column_split = factor(states[plot_cells], levels = state_levels),
+  cluster_rows = FALSE, cluster_columns = FALSE, show_column_names = FALSE,
+  row_names_gp = grid::gpar(fontsize = 13), column_title_gp = grid::gpar(fontsize = 13),
+  column_title_rot = 30, use_raster = TRUE,
+  column_title = "At most 500 cells per state; display sample only"
+))
 dev.off()
-
-prop_plots <- make_prop_and_pie(state_B)
-ggsave(
-  "Auto_topmp_v2_noreg_proportion_B_withpie.pdf",
-  prop_plots$bar + prop_plots$pie,
-  width = 16,
-  height = 7
-)
-ggsave(
-  "Auto_topmp_v2_noreg_ccscore_boxplot_B.pdf",
-  make_cc_box(state_B),
-  width = 10,
-  height = 6
-)
-
-write.csv(
-  prop_plots$overall %>% transmute(state, cells = n, pct),
-  "Auto_topmp_v2_noreg_summary.csv",
-  row.names = FALSE
-)
-
-write.csv(
-  prop_plots$overall %>% transmute(state, cells = n, pct),
-  file.path(output_dirs["tables"], "approach_b_noreg_summary.csv"),
-  row.names = FALSE
-)
-
-run_summary <- finish_run_summary(run_summary, status = "ok")
-write_run_summary(
-  run_summary,
-  file.path(output_dirs["logs"], "assign_states_approach_b_noreg.log")
-)
+write.csv(data.frame(file = pdf_path, role = "Final cohort abundance and sampled MP heatmap"),
+          file.path(output_dirs["reports"], "Auto_figure_index.csv"), row.names = FALSE)
+run_summary <- finish_run_summary(run_summary, "ok")
+write_run_summary(run_summary, file.path(output_dirs["logs"], "state_assignment.log"))
+message("CENTRED_STATE_ASSIGNMENT_OK: ", length(states), " cells; ", length(biological_states), " biological states")
+####################

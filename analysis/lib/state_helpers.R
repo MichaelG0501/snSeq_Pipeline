@@ -58,7 +58,7 @@ label_mp <- function(mp_vec, mp_descriptions = MP_DESCRIPTIONS) {
 }
 
 state_order <- function(states = NULL) {
-  base_order <- c(names(STATE_GROUPS), "3CA_EMT_and_Protein_maturation", "Unresolved", "Hybrid")
+  base_order <- c(names(STATE_GROUPS), "Unresolved", "Hybrid")
   if (is.null(states)) {
     return(base_order)
   }
@@ -91,8 +91,24 @@ build_group_max <- function(mp_adj, state_groups = STATE_GROUPS) {
 }
 
 read_preferred_states <- function() {
-  if (file.exists(PREFERRED_STATE_DEFINITION$final_state_file)) {
-    return(readRDS(PREFERRED_STATE_DEFINITION$final_state_file))
-  }
-  readRDS(PREFERRED_STATE_DEFINITION$primary_state_file)
+  path <- PREFERRED_STATE_DEFINITION$final_state_file
+  if (!file.exists(path)) stop("Missing current centred state file: ", path)
+  readRDS(path)
 }
+
+####################
+# Current centred Approach-B thresholds; preserve exact barcode names.
+call_approach_b_states <- function(group_max, thresholds = STATE_THRESHOLDS) {
+  stopifnot(is.matrix(group_max), ncol(group_max) >= 2L,
+            !is.null(rownames(group_max)), !anyDuplicated(rownames(group_max)),
+            !is.null(colnames(group_max)), all(is.finite(group_max)))
+  maximum <- apply(group_max, 1, max)
+  ordered <- t(apply(group_max, 1, sort, decreasing = TRUE))
+  gap <- ordered[, 1] - ordered[, 2]
+  states <- colnames(group_max)[max.col(group_max, ties.method = "first")]
+  states[maximum < thresholds$approach_b_min_best_score] <- "Unresolved"
+  states[maximum >= thresholds$approach_b_min_best_score & gap < thresholds$approach_b_hybrid_gap] <- "Hybrid"
+  names(states) <- rownames(group_max)
+  states
+}
+####################

@@ -1,11 +1,18 @@
 ####################
 # Analysis registry:
-#   Status: active
+#   Status: legacy; historical uncentred/3CA route; no current consumers
 #   Script: analysis/cell_states/relabel_unresolved_retained_3ca.R
 #   Methodology: analysis/methodology/cell_states/relabel_unresolved_retained_3ca_methodology.md
 #   Map: analysis/ANALYSIS_MAP.md
 #   Output tiers: sn_outs/cell_states/unresolved_relabel/{intermediate,tables,figures,logs,reports}
 ####################
+
+####################
+# Retired entry point: prevent historical uncentred outputs from being consumed
+# as current centred results. The original implementation remains below.
+stop("Historical uncentred workflow retired; use assign_states_approach_b_noreg.R for current centred outputs.")
+####################
+
 
 ####################
 # relabel_unresolved_retained_3ca.R
@@ -50,7 +57,7 @@ library(scales)
 library(patchwork)
 library(grid)
 
-source("/rds/general/ephemeral/project/tumourheterogeneity1/ephemeral/snSeq_Pipeline/analysis/lib/config.R")
+source("/rds/general/project/tumourheterogeneity1/live/snSeq_Pipeline/analysis/lib/config.R")
 source(file.path(ANALYSIS_DIR, "lib", "state_helpers.R"))
 source(file.path(ANALYSIS_DIR, "lib", "io_helpers.R"))
 source(file.path(ANALYSIS_DIR, "lib", "logging.R"))

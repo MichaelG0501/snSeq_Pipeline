@@ -35,7 +35,7 @@ suppressPackageStartupMessages({
   library("scales")
 })
 
-source("/rds/general/ephemeral/project/tumourheterogeneity1/ephemeral/snSeq_Pipeline/analysis/lib/config.R")
+source("/rds/general/project/tumourheterogeneity1/live/snSeq_Pipeline/analysis/lib/config.R")
 source(file.path(ANALYSIS_DIR, "lib", "logging.R"))
 
 setwd(PROJECT_DIR)

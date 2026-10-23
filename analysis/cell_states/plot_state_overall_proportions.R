@@ -1,11 +1,18 @@
 ####################
 # Analysis registry:
-#   Status: active terminal figure-generation
+#   Status: legacy; historical uncentred/3CA route; no current consumers terminal figure-generation
 #   Script: analysis/cell_states/plot_state_overall_proportions.R
 #   Methodology: analysis/methodology/cell_states/plot_state_overall_proportions_methodology.md
 #   Map: analysis/ANALYSIS_MAP.md
 #   Output tiers: sn_outs/cell_states/overall_proportions/{intermediate,tables,figures,logs,reports}
 ####################
+
+####################
+# Retired entry point: prevent historical uncentred outputs from being consumed
+# as current centred results. The original implementation remains below.
+stop("Historical uncentred workflow retired; use assign_states_approach_b_noreg.R for current centred outputs.")
+####################
+
 
 ####################
 # plot_state_overall_proportions.R
@@ -32,7 +39,7 @@ library(dplyr)
 library(tidyr)
 library(scales)
 
-source("/rds/general/ephemeral/project/tumourheterogeneity1/ephemeral/snSeq_Pipeline/analysis/lib/config.R")
+source("/rds/general/project/tumourheterogeneity1/live/snSeq_Pipeline/analysis/lib/config.R")
 source(file.path(ANALYSIS_DIR, "lib", "state_helpers.R"))
 source(file.path(ANALYSIS_DIR, "lib", "logging.R"))
 

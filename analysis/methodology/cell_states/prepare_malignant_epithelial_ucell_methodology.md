@@ -1,57 +1,49 @@
-# Malignant Epithelial Merge and UCell Scoring Methodology
+# Malignant epithelial merge and current centred scRef UCell scoring
 
-## Goal
+## Input scope
 
-`analysis/cell_states/prepare_malignant_epithelial_ucell.R` prepares the malignant epithelial object used by all downstream state analyses. It merges only completed step-6 samples and computes UCell scores for the retained scRef metaprograms and the 3CA metaprograms.
+Use only the current local `sn_outs/sample_manifest.csv`. Eligible samples require
+expr_filter_status, infercna_status, and malignancy_status all equal to `ok`, plus
+the final per-sample `_epi_f.rds`. Only malignant_level_1 and malignant_level_2
+cells enter the merge. Preserve `orig.ident`, `reference_batch`, technology,
+classification, and malignancy. No upstream annotation or derived cohort object
+is reused. Stages 1–6 remain raw-only and their thresholds are unchanged.
 
-## Inputs
+## Current reference
 
-- `sn_outs/sample_manifest.csv`
-- Per-sample status files under `sn_outs/by_samples/<sample>/`
-- Final step-6 epithelial objects: `<sample>_epi_f.rds`
-- scRef metaprograms:
-  `/rds/general/ephemeral/project/tumourheterogeneity1/ephemeral/scRef_Pipeline/ref_outs/Metaprogrammes_Results/geneNMF_metaprograms_nMP_19.rds`
-- 3CA metaprograms:
-  `/rds/general/project/tumourheterogeneity1/live/ITH_sc/PDOs/Count_Matrix/New_NMFs.csv`
-- Cell-cycle reference:
-  `/rds/general/project/tumourheterogeneity1/live/EAC_Ref_all/Cell_Cycle_Genes.csv`
+Load only the live scRef centred refined gene collection at
+`/rds/general/project/tumourheterogeneity1/live/scRef_Pipeline/ref_outs/Metaprogrammes_Results/centred/mp_refinement/intermediate/merged_refined_mp_genes.rds`
+and the corresponding `tables/centred_refined_mp_state_grouping.csv`. Copy genes
+and grouping to live `sn_outs/cell_states/centred/`, record source paths and MD5s,
+and require matching unique MP identities. Do not reapply historical silhouette
+or coverage filters. Stop if any required MP has no assayed genes. Record full
+signature size and detected-gene overlap for every MP.
 
-## Sample Eligibility
+3CA signatures come from
+`/rds/general/project/tumourheterogeneity1/live/ITH_sc/PDOs/Count_Matrix/New_NMFs.csv`.
+Consensus cell-cycle genes come from
+`/rds/general/project/tumourheterogeneity1/live/EAC_Ref_all/Cell_Cycle_Genes.csv`.
+These are diagnostic outputs, not additional current state-defining groups.
 
-A sample is included only if all of the following are true:
+## Ranking and scoring
 
-- `expr_filter_status.txt = ok`
-- `infercna_status.txt = ok`
-- `malignancy_status.txt = ok`
-- `<sample>_epi_f.rds` exists
+Assemble normalized RNA data for every assayed gene and every merged cell,
+retaining exact cell names across Seurat layers. UCell must rank the full gene
+universe. Never restrict expression rows to signature genes before ranking:
+that changes ranks and makes scores dependent on the chosen signature panel.
+Use the gnmf environment, four worker cores, and fixed seed 1. Save current MP
+UCell scores to `cell_states/centred/intermediate/merged_refined_ucell_scores.rds`.
+Score 3CA signatures on the same full expression matrix and retain
+`UCell_3CA_MPs.rds` as a diagnostic compatibility output. Use the top 50 expressed
+consensus cell-cycle genes to retain the existing diagnostic CC score outputs.
 
-Only cells labelled `malignant_level_1` or `malignant_level_2` are retained.
+## Storage, execution, and validation
 
-## Method
-
-1. Read the current manifest and status files.
-2. Load eligible final epithelial objects.
-3. Subset each object to malignant epithelial cells.
-4. Merge all malignant epithelial objects into `snSeq_malignant_epi.rds`.
-5. Copy/read the retained scRef metaprogram definitions.
-6. Build an explicit sparse expression matrix from Seurat v5 `data.*` layers for the genes needed by downstream scoring.
-7. Score retained scRef MPs with `ScoreSignatures_UCell()`.
-8. Score 3CA metaprograms with `ScoreSignatures_UCell()`.
-9. Derive the top 50 consensus cell-cycle genes by mean expression and save a per-cell cell-cycle score.
-
-## Outputs
-
-- `sn_outs/snSeq_malignant_epi.rds`
-- `sn_outs/snSeq_malignant_epi_meta.rds`
-- `sn_outs/snSeq_malignant_epi_sample_summary.csv`
-- `sn_outs/snSeq_malignant_epi_status_input.csv`
-- `sn_outs/snSeq_malignant_epi_overall_summary.csv`
-- `sn_outs/snSeq_malignant_epi_cc_top50.rds`
-- `sn_outs/snSeq_malignant_epi_cc_score.rds`
-- `sn_outs/Metaprogrammes_Results/UCell_nMP19_filtered.rds`
-- `sn_outs/UCell_3CA_MPs.rds`
-- Run log under `sn_outs/cell_states/ucell_scoring/logs/`
-
-## Downstream Dependencies
-
-The output RDS files are required by `assign_states_approach_b_noreg.R` and `relabel_unresolved_retained_3ca.R`.
+`qsub 8_geneNMF.sh` requests 4 CPUs, 128 GB, 8 hours, and gnmf. It always rebuilds
+from current stage-6 objects and reference files; it never reuses historical
+nMP19 scores. Canonical malignant Seurat/metadata objects and contribution/status
+summaries remain in live `sn_outs/`; current MP inputs/scores, overlap tables, and
+provenance use `cell_states/centred/` tiers. The scoring run log lives under
+`cell_states/ucell_scoring/logs/`. The controller runs the existing malignancy
+integrity audit before this merge. Assignment then requires complete barcode/MP
+coverage and finite scores. Do not present partial-cohort outputs as complete.

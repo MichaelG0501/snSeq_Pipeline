@@ -1,3 +1,9 @@
+# Historical methodology — retired uncentred workflow
+
+This retained script has no current consumers and now stops before computation.
+Use assign_states_approach_b_noreg.R and its methodology for current centred
+states and figures. The historical method is retained below as provenance.
+
 # Pairwise Hybrid State Plot Methodology
 
 ## Goal

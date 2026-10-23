@@ -5,7 +5,7 @@ suppressPackageStartupMessages({
 
 set.seed(1)
 
-setwd("/rds/general/ephemeral/project/tumourheterogeneity1/ephemeral/snSeq_Pipeline/sn_outs")
+setwd("/rds/general/project/tumourheterogeneity1/live/snSeq_Pipeline/sn_outs")
 
 args <- commandArgs(trailingOnly = TRUE)
 sample <- args[1]

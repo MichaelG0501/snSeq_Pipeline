@@ -1,3 +1,21 @@
+# Current execution contract (2026-10-19)
+
+Stages 1–6 retain the raw-input workflow and biological thresholds documented
+below. All canonical inputs and outputs use the live project root. After QC,
+`Auto_run_standard_pipeline.sh` runs standard stages 2–6, compiles InferCNA
+signatures, verifies malignancy integrity, scores the current centred scRef MP
+panel using full-gene UCell ranking, assigns current noreg states, and submits
+the updated matched PDO comparison. Its PBS stage gates require successful exits
+and expected outputs; only explicit step-5 no_epi/no_cell biological skip markers
+can accompany nonzero exits. Unexpected failures and missing references stop
+progress. The controller uses 1 CPU, 4 GB, 72 hours; analytical jobs have separate
+resource allocations. See analysis/ANALYSIS_MAP.md for current downstream paths.
+
+Current state methods are documented in the updated preparation and assignment
+methodology files. Historical uncentred nMP19/3CA state sections below are retained
+only as provenance and are not current execution instructions. No files are
+automatically deleted. This contract supersedes conflicting historical text.
+
 # snRNA-seq Pipeline Methodology
 
 This document describes how the current `snSeq_Pipeline` code is working for:
@@ -1114,7 +1132,7 @@ Cells labelled `unresolved` or non-malignant are not included in the merged obje
 
 The metaprogram definitions are copied from:
 
-- `/rds/general/ephemeral/project/tumourheterogeneity1/ephemeral/scRef_Pipeline/ref_outs/Metaprogrammes_Results/geneNMF_metaprograms_nMP_19.rds`
+- `/rds/general/project/tumourheterogeneity1/live/scRef_Pipeline/ref_outs/Metaprogrammes_Results/geneNMF_metaprograms_nMP_19.rds`
 
 They are then stored locally in:
 
