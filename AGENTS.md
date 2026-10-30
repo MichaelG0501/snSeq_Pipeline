@@ -475,3 +475,25 @@ on external modifications; unrelated external files remain untouched.
   groups as in the original; projected Hybrid/Unresolved remain in denominators.
   All source cells remain in audit tables. The 20-cell gate applies to expression
   effects only, not UCell receiving-state means. Canonical native labels are unchanged.
+
+## Relative matched-PDO cohort concordance
+
+- `analysis/cell_states/rank_matched_pdo_state_concordance.R` complements the
+  matched-pair analysis by ranking each biopsy state against the corresponding
+  state in every eligible current PDO sample. Reuse the fixed original reference
+  gene pool, restrict only by common assay availability, and keep the 20-cell gate.
+- Normalize all candidate PDOs together before within-sample effects. Never mix
+  old two-PDO-normalized vectors with newly normalized comparator PDOs. Biopsy
+  profiles are normalized separately within their modality. Native labels stay fixed.
+- Rank PDO samples, not independent patients; current cultures include repeated
+  donors and treatment conditions. Report rank denominators, ties, state cell
+  counts and matched-minus-best-other margins without inferential significance.
+- The single selected combined PDF belongs under live
+  `sn_outs/cell_states/matched_pdo_relative_concordance/figures/Auto_final/`.
+  Combine both biopsies in the heatmap and rank overview; examples compare
+  Matched PDO, Highest matching (highest other PDO) and Median matching (distinct
+  median-rank example). Omit unmapped immune mimicry rows from figures but retain
+  their unavailable source-table entries. Keep undersized biopsy states visibly
+  unavailable. Heatmap row axis is snSeq state; red boxes (1.4) mark row maxima,
+  black boxes (0.7) mark true matches. Omit stars and page-footer paragraphs.
+  Preserve the previous analysis.

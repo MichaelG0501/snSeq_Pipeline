@@ -131,3 +131,23 @@ results are stable under sn_outs/cell_states/matched_pdo_sn_concordance/
 {figures,tables,reports,logs,intermediate,reference}. Current scRef source MPs are
 verified identical to canonical sn copies. The launcher supports plot_only=true;
 canonical native labels remain unchanged.
+
+## Relative matched-PDO cohort ranking
+
+| Script | Status / run order | Dependencies | Outputs / consumers |
+|---|---|---|---|
+| cell_states/rank_matched_pdo_state_concordance.R | Active terminal; after current sn malignancy/states and PDO centred states | Current PDO cohort raw RNA/native states, two matched sn biopsies and status gates; original PDO/scRef informative-gene pool; shared concordance helpers | cell_states/matched_pdo_relative_concordance/: one selected combined ranked-cohort PDF, source scores/ranks/effect vectors, caches and reports; no downstream pipeline consumer |
+
+This complements the absolute matched-pair report without modifying it. For
+each biopsy/native state, all eligible PDO samples are compared in the fixed
+corresponding native state on identical available reference genes. The heatmap
+and rank-context page combine both biopsies; example pages compare Matched PDO,
+Highest matching (highest other PDO) and Median matching (distinct median-rank
+example). Canonical exclusions and the 20-cell gate remain. Unmapped immune
+mimicry rows remain in source tables and are omitted from figures; rare
+unsupported states stay visibly unavailable. Red heatmap boxes mark row maxima,
+thinner black boxes mark true matches, and page footers are omitted.
+Ranks are descriptive PDO-sample ranks; repeated donor
+cultures are not treated as independent patients. All PDOs share expanded-cohort
+normalization. plot_only=true supports replotting without count reload; mirrored
+methodology and the exact matching job_scripts launcher document execution.
