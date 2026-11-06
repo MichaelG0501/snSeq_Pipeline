@@ -497,3 +497,43 @@ on external modifications; unrelated external files remain untouched.
   unavailable. Heatmap row axis is snSeq state; red boxes (1.4) mark row maxima,
   black boxes (0.7) mark true matches. Omit stars and page-footer paragraphs.
   Preserve the previous analysis.
+
+## Pan-cancer 3CA relative concordance
+
+- `analysis/cell_states/rank_matched_pdo_3ca_concordance.R` adds an independent
+  mean-MP endpoint under `sn_outs/cell_states/matched_pdo_3ca_concordance/`.
+  Recompute all 67 fixed pan-cancer MPs consistently on current malignant RNA
+  counts, using identical common-assayed signature genes and full assayed-gene
+  UCell ranking, maxRank 1500. Preserve canonical native labels and PDO exclusions.
+- Primary ranks correlate whole-sample mean UCell profiles across all 67 MPs.
+  Prespecified sensitivity excludes MP1–MP5 only. Supporting native-state
+  comparisons retain the existing four biological correspondences and 20-cell
+  gate. Report observed ranks without tuning towards true matched identities.
+- Celligner is distinct from this correlation endpoint. Its published pan-cancer
+  reference alignment and 70-PC distances cannot be reproduced by relabelling a
+  local PCA or MP correlation. Document feasibility and obtain the user's scope
+  choice before a scientifically different adaptation or public-reference run.
+
+## Public Celligner reference acquisition
+
+- The user selected obtaining a pan-cancer reference for the Celligner analysis.
+  `analysis/cell_states/celligner/prepare_celligner_reference.R` downloads and
+  validates the original public Figshare release 11965269 v5 under live
+  `sn_outs/cell_states/matched_pdo_celligner_concordance/`. Verify published MD5,
+  13,485 samples, 19,188 genes, sample identities and cPC/gene alignment before use.
+- The exact 2026 HCMI aligned expression and cPC files are controlled-access at
+  GDC; do not mislabel the original public reference as the exact HCMI fit.
+  Do not attempt restricted downloads without authorization or bypass controls.
+- Public aligned expression alone is not a complete pretrained model. Keep
+  reference acquisition distinct from a validated projection. Document any
+  UMI/log-CPM input adaptation and never tune parameters using true-match ranks.
+
+- `analysis/cell_states/celligner/rank_matched_pdo_celligner_concordance.R`
+  specifies an exploratory projection using that public reference: common
+  uniquely mapped genes, UMI log2(CPM+1), published original cPCs 1–4, reference-only
+  top-1,000 differential genes and the pinned authors' unmodified MNN function
+  (k1=20, k2=50, ndist=3). This reconstructed feature state is explicit and is
+  not described as an unavailable complete serialized model or the HCMI fit.
+  Freeze the reference-only 70-PC distance basis, export direct MNN support and
+  before/after ranks, and use UMAP only as visual context. Matched identities
+  enter only after alignment. Do not claim the study's FDR for local UMI pairs.
